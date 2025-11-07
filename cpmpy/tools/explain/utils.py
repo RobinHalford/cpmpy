@@ -16,6 +16,7 @@
         make_assump_model
 """
 
+import numpy as np
 import cpmpy as cp
 from cpmpy.transformations.normalize import toplevel_list
 
@@ -81,3 +82,22 @@ def diversity(set1, set2, measure="Jaccard"):
     
     else:
         raise ValueError(f"Unknown diversity measure: {measure}")
+
+
+def diversity_matrix(list_of_sets, measure="Jaccard"):
+    """
+        Computes the diversity matrix (upper triangular) with the pairwise diversities between all the sets of `list_of_sets`.
+        The value at index [i, j] is the diversity between set i and set j.
+
+        :param: list_of_sets: A list of sets for which the diversity matrix will be computed
+        :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")
+    """
+    n = len(list_of_sets)
+    divs = np.zeros((n,n))
+
+    for i in range(n):
+        for j in range(i+1, n):
+            a, b = list_of_sets[i], list_of_sets[j]
+            divs[i, j] = diversity(a, b, measure)
+
+    return divs
