@@ -19,6 +19,8 @@
 import numpy as np
 import cpmpy as cp
 from cpmpy.transformations.normalize import toplevel_list
+from itertools import combinations
+
 
 def make_assump_model(soft, hard=[], name=None):
     """
@@ -75,6 +77,7 @@ def diversity(set1, set2, measure="Jaccard"):
         return score
     
     elif measure in ("set difference", "symmetric set difference"):
+        # normalized symmetric set difference is the same as (1 - jaccardIndex) so this is kinda pointless
         common = len(set1 & set2)
         union = s1 + s2 - common
         diff = union - common
@@ -95,9 +98,8 @@ def diversity_matrix(list_of_sets, measure="Jaccard"):
     n = len(list_of_sets)
     divs = np.zeros((n,n))
 
-    for i in range(n):
-        for j in range(i+1, n):
-            a, b = list_of_sets[i], list_of_sets[j]
-            divs[i, j] = diversity(a, b, measure)
+    for (i, j) in combinations(range(n), 2):
+        a, b = list_of_sets[i], list_of_sets[j]
+        divs[i, j] = diversity(a, b, measure)
 
     return divs
