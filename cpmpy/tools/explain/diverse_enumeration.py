@@ -35,7 +35,7 @@ def marco_until_diverse(constraints, k, i):
     div_matrix = np.empty((1,1), dtype=float)
     div_matrix[0, 0] = 0
     
-    print("Starting to enumerate MUSes ...")
+    # print("Starting to enumerate MUSes ...")
     top_indx = None
     avg = 0
 
@@ -45,23 +45,23 @@ def marco_until_diverse(constraints, k, i):
         if j > 0:
             div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)) ,mode="constant")
 
-        print(f"Found MUS number {j}")
+        # print(f"Found MUS number {j}")
         
         for l in range(len(muses)-1):
-            print(f"Diversity between MUS {j} and MUS {l}: {diversity(muses[l], mus)}")
+            # print(f"Diversity between MUS {j} and MUS {l}: {diversity(muses[l], mus)}")
             div_matrix[l,j] = diversity(muses[l], mus)
         
-        print(f"The diversity matrix is now: \n {div_matrix}.")
+        # print(f"The diversity matrix is now: \n {div_matrix}.")
 
         if j == k:
             top_indx, avg = select_top_k(div_matrix, k,incremental_last=False)
-            print(f"Current max average: {avg}")
+            # print(f"Current max average: {avg}")
             if avg >= 1:
                 break
 
         if j > k:
             top_indx, avg = select_top_k(div_matrix, k,incremental_last=True, max_comb=top_indx, max_avg=avg)
-            print(f"Current max average: {avg}")
+            # print(f"Current max average: {avg}")
             if avg >= 1:
                 break
 
@@ -114,14 +114,14 @@ def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
         last = n - 1
         for base in combinations(range(n-1),k-1):
             comb = base + (last,)
-            print(f"combination: {comb}")
+            # print(f"combination: {comb}")
             curr_sum = 0
             for indx in combinations(comb, 2):
                 curr_sum += matrix[indx]
-                print(f"taking avg elem: {matrix[indx]}")
+                # print(f"taking avg elem: {matrix[indx]}")
 
             curr_avg = curr_sum / total_pairs
-            print(f"The avg div of this combination was: {curr_avg}.")
+            # print(f"The avg div of this combination was: {curr_avg}.")
 
             if curr_avg > max_avg:
                 max_avg = curr_avg
@@ -130,13 +130,13 @@ def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
     else:
         for comb in combinations(range(n), k):
             curr_sum = 0
-            print(f"combination: {comb}")
+            # print(f"combination: {comb}")
             for indx in combinations(comb, 2):
-                print(f"taking avg elem: {matrix[indx]}")
+                # print(f"taking avg elem: {matrix[indx]}")
                 curr_sum += matrix[indx]
         
             curr_avg = curr_sum / total_pairs
-            print(f"The avg div of this combination was: {curr_avg}.")
+            # print(f"The avg div of this combination was: {curr_avg}.")
 
             if curr_avg > max_avg:
                 max_avg = curr_avg
