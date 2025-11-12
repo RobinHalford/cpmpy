@@ -1,7 +1,7 @@
 import cpmpy as cp
 import numpy as np
 from .marco import marco
-from .utils import diversity
+from .utils import diversity, diversity_matrix
 from itertools import combinations
 
 
@@ -9,8 +9,21 @@ from itertools import combinations
 
 
 # enumerate a fixed amount i MUSes, compute the diversity matrix, select the subset with the highest diversity and return it.
-def marco_select_top_k():
-    return
+def marco_select_top_k(constraints, k, i):
+    
+    muses = []
+
+    for j, (_, mus) in enumerate(marco(constraints, solver="exact", map_solver="exact", return_mcs=False)):
+        muses.append(frozenset(mus))
+
+        if j == i:
+            break
+    
+    div_matrix = diversity_matrix(muses)
+    top_indx, avg = select_top_k(div_matrix, k)
+    top_muses = [muses[i] for i in top_indx]
+
+    return top_indx, top_muses, avg, div_matrix
 
 
 # enumerate MUSes with marco, at every iteration grow the diversity matrix and
@@ -19,8 +32,8 @@ def marco_until_diverse(constraints, k, i):
     
     # initiate list and matrix
     muses = []
-    diversity_matrix = np.empty((1,1), dtype=float)
-    diversity_matrix[0, 0] = 0
+    div_matrix = np.empty((1,1), dtype=float)
+    div_matrix[0, 0] = 0
     
     print("Starting to enumerate MUSes ...")
     top_indx = None
@@ -30,24 +43,24 @@ def marco_until_diverse(constraints, k, i):
         muses.append(frozenset(mus))
 
         if j > 0:
-            diversity_matrix = np.pad(diversity_matrix, ((0, 1), (0, 1)) ,mode="constant")
+            div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)) ,mode="constant")
 
         print(f"Found MUS number {j}")
         
         for l in range(len(muses)-1):
             print(f"Diversity between MUS {j} and MUS {l}: {diversity(muses[l], mus)}")
-            diversity_matrix[l,j] = diversity(muses[l], mus)
+            div_matrix[l,j] = diversity(muses[l], mus)
         
-        print(f"The diversity matrix is now: \n {diversity_matrix}.")
+        print(f"The diversity matrix is now: \n {div_matrix}.")
 
         if j == k:
-            top_indx, avg = select_top_k(diversity_matrix, k,incremental_last=False)
+            top_indx, avg = select_top_k(div_matrix, k,incremental_last=False)
             print(f"Current max average: {avg}")
             if avg >= 1:
                 break
 
         if j > k:
-            top_indx, avg = select_top_k(diversity_matrix, k,incremental_last=True, max_comb=top_indx, max_avg=avg)
+            top_indx, avg = select_top_k(div_matrix, k,incremental_last=True, max_comb=top_indx, max_avg=avg)
             print(f"Current max average: {avg}")
             if avg >= 1:
                 break
@@ -57,7 +70,7 @@ def marco_until_diverse(constraints, k, i):
 
     top_muses = [muses[i] for i in top_indx]
     
-    return top_indx, top_muses, avg, diversity_matrix
+    return top_indx, top_muses, avg, div_matrix
 
 
 # enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
