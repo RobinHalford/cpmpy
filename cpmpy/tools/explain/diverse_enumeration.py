@@ -23,6 +23,8 @@ def marco_until_diverse(constraints, k, i):
     diversity_matrix[0, 0] = 0
     
     print("Starting to enumerate MUSes ...")
+    top_indx = None
+    avg = 0
 
     for j, (_, mus) in enumerate(marco(constraints, solver="exact", map_solver="exact", return_mcs=False)):
         muses.append(frozenset(mus))
@@ -38,8 +40,14 @@ def marco_until_diverse(constraints, k, i):
         
         print(f"The diversity matrix is now: \n {diversity_matrix}.")
 
-        if j >= k:
-            top_indx, avg = select_top_k(diversity_matrix, k)
+        if j == k:
+            top_indx, avg = select_top_k(diversity_matrix, k,incremental_last=False)
+            print(f"Current max average: {avg}")
+            if avg >= 1:
+                break
+
+        if j > k:
+            top_indx, avg = select_top_k(diversity_matrix, k,incremental_last=True, max_comb=top_indx, max_avg=avg)
             print(f"Current max average: {avg}")
             if avg >= 1:
                 break
@@ -49,7 +57,7 @@ def marco_until_diverse(constraints, k, i):
 
     top_muses = [muses[i] for i in top_indx]
     
-    return top_muses, avg, diversity_matrix
+    return top_indx, top_muses, avg, diversity_matrix
 
 
 # enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
@@ -71,34 +79,54 @@ def marco_diverse_ocus():
 
 # helper function
 
-def select_top_k(matrix, k):
+def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
     """
-        Returns a tuple with the indeces of the top-k most diverse MUSes.
+        Returns a tuple with the indeces of the top-k highest average in the matrix.
 
-        :param: matrix: the diversity matrix
-        :param: k: the size of the top subset to be computed 
+        :param: matrix: the upper triangular matrix with values
+        :param: k: the size of the top subset to be computed
+        :param: incremental_last: whether only the combinations with the last element
+             in it are computed because this function is used incrementally.
     """
 
-    max_div = 0
-    max_comb = None
+    n = len(matrix)
 
-    # TODO: write a version that only computes the new combinations (with the last MUS) 
-    # so that no double work is done in the marco_until_diverse
+    if k <= 0 or n<=1:
+        return max_comb, max_avg
+    
+    total_pairs = k * (k - 1) / 2.0
 
-    for comb in combinations(range(0, len(matrix[0])), k):
-        avg_div = 0
-        n = 0
-        print(f"combination: {comb}")
-        for indx in combinations(comb, 2):
-            print(f"taking avg elem: {matrix[indx]}")
-            avg_div += matrix[indx]
-            n += 1
+    if incremental_last:
+
+        last = n - 1
+        for base in combinations(range(n-1),k-1):
+            comb = base + (last,)
+            print(f"combination: {comb}")
+            curr_sum = 0
+            for indx in combinations(comb, 2):
+                curr_sum += matrix[indx]
+                print(f"taking avg elem: {matrix[indx]}")
+
+            curr_avg = curr_sum / total_pairs
+            print(f"The avg div of this combination was: {curr_avg}.")
+
+            if curr_avg > max_avg:
+                max_avg = curr_avg
+                max_comb = comb
+    
+    else:
+        for comb in combinations(range(n), k):
+            curr_sum = 0
+            print(f"combination: {comb}")
+            for indx in combinations(comb, 2):
+                print(f"taking avg elem: {matrix[indx]}")
+                curr_sum += matrix[indx]
         
-        avg_div = avg_div / n
-        print(f"The avg div of this combination was: {avg_div}.")
+            curr_avg = curr_sum / total_pairs
+            print(f"The avg div of this combination was: {curr_avg}.")
 
-        if avg_div > max_div:
-            max_div = avg_div
-            max_comb = comb
+            if curr_avg > max_avg:
+                max_avg = curr_avg
+                max_comb = comb
 
-    return max_comb, max_div
+    return max_comb, max_avg
