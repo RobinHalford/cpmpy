@@ -22,19 +22,27 @@ def marco_until_diverse(constraints, k, i):
     diversity_matrix = np.empty((1,1), dtype=float)
     diversity_matrix[0, 0] = 0
     
+    print("Starting to enumerate MUSes ...")
 
     for j, (_, mus) in enumerate(marco(constraints, solver="exact", map_solver="exact", return_mcs=False)):
         muses.append(frozenset(mus))
-        diversity_matrix = np.pad(diversity_matrix, ((0, 1), (0, 1)) ,mode="constant")
+
+        if j > 0:
+            diversity_matrix = np.pad(diversity_matrix, ((0, 1), (0, 1)) ,mode="constant")
+
+        print(f"Found MUS number {j}")
         
-        for l in range():
+        for l in range(len(muses)-1):
+            print(f"Diversity between MUS {j} and MUS {l}: {diversity(muses[l], mus)}")
             diversity_matrix[l,j] = diversity(muses[l], mus)
         
+        print(f"The diversity matrix is now: \n {diversity_matrix}.")
+
         if j >= k:
             top_indx, avg = select_top_k(diversity_matrix, k)
-        
-        if avg >= 1:
-            break
+            print(f"Current max average: {avg}")
+            if avg >= 1:
+                break
 
         if j == i:
             break
@@ -74,13 +82,20 @@ def select_top_k(matrix, k):
     max_div = 0
     max_comb = None
 
+    # TODO: write a version that only computes the new combinations (with the last MUS) 
+    # so that no double work is done in the marco_until_diverse
+
     for comb in combinations(range(0, len(matrix[0])), k):
         avg_div = 0
-        
+        n = 0
+        print(f"combination: {comb}")
         for indx in combinations(comb, 2):
+            print(f"taking avg elem: {matrix[indx]}")
             avg_div += matrix[indx]
+            n += 1
         
-        avg_div = avg_div / len(comb)
+        avg_div = avg_div / n
+        print(f"The avg div of this combination was: {avg_div}.")
 
         if avg_div > max_div:
             max_div = avg_div
