@@ -81,7 +81,7 @@ def ocus_enum():
 
 # a modified version of marco where the grow and shrink procedures select constraints first that would make it more diverse
 # and the solution hint is set to promote unseen constraints
-def marco_diverse_greedy(soft, hard=[], solver="ortools", map_solver="ortools", return_mus=True, return_mcs=False, do_solution_hint=True):
+def marco_diverse_greedy(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True):
 
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
 
