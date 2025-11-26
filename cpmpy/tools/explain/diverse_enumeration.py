@@ -98,7 +98,7 @@ def marco_diverse_greedy(soft, hard=[], solver="ortools", map_solver="ortools", 
         hint = [1]*len(assump)
         map_solver.solution_hint(assump, hint) # we want large subsets, more likely to be a MUS
 
-    # TODO: make deletion order based on already seen constraints (done)
+    # TODO (done): make deletion order based on already seen constraints
     # deletion_order = {a : -len(get_variables(dmap[a])) for a in assump} # avoid recomputing
     # deletion_order = {a :seen_map[a] for a in assump}
     # keep a map of which constraints are seen in previously generated MUSes
