@@ -1,0 +1,3 @@
+[submodule "cpmpy/tools/explain/XCP-explain"]
+	path = cpmpy/tools/explain/XCP-explain
+	url = git@github.com:CPMpy/XCP-explain.git
