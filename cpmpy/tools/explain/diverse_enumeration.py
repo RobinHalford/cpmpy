@@ -1,8 +1,9 @@
 import cpmpy as cp
 import numpy as np
 from .marco import marco
-from .utils import diversity, diversity_matrix
+from .utils import make_assump_model, diversity, diversity_matrix
 from itertools import combinations
+from cpmpy.transformations.get_variables import get_variables
 
 
 # SHORT TEMPORARY DESCRIPTIONS
@@ -78,10 +79,81 @@ def ocus_enum():
     return
 
 
-# an modified version of marco where the grow and shrink procedures select constraints first that would make it more diverse
-# (and the map solver minimizes already found constraints?) (or should this be a seperate function, and the combination a separate too?)
-def marco_diverse_greedy():
-    return
+# a modified version of marco where the grow and shrink procedures select constraints first that would make it more diverse
+# and the solution hint is set to promote unseen constraints
+def marco_diverse_greedy(soft, hard=[], solver="ortools", map_solver="ortools", return_mus=True, return_mcs=False, do_solution_hint=True):
+
+    assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
+
+    model, soft, assump = make_assump_model(soft, hard)
+    dmap = dict(zip(assump, soft))
+    s = cp.SolverLookup.get(solver, model)
+
+    # map solver for computing hitting sets
+    map_solver = cp.SolverLookup.get(map_solver)
+    do_solution_hint = do_solution_hint and hasattr(map_solver, 'solution_hint')  # solver may not support solution hinting...
+
+    map_solver += cp.any(assump)
+    if do_solution_hint:
+        hint = [1]*len(assump)
+        map_solver.solution_hint(assump, hint) # we want large subsets, more likely to be a MUS
+
+    # TODO: make deletion order based on already seen constraints (done)
+    # deletion_order = {a : -len(get_variables(dmap[a])) for a in assump} # avoid recomputing
+    # deletion_order = {a :seen_map[a] for a in assump}
+    # keep a map of which constraints are seen in previously generated MUSes
+    seen_map = dict(zip(assump, [0]*len(assump)))
+    
+    while map_solver.solve():
+
+        seed = [a for a in assump if a.value()]
+
+        if s.solve(assumptions=seed) is True:
+            # TODO (done): grow with already seen *similar* !! constraints first (a blocked similar MCS will stimulate more diverse MUS)
+
+            # SAT, grow, to full MSS
+            # Assumptions encode indicator constraints a -> c, find all true assumptions
+            #    and those that could just as well be made true given the current solution
+            mss = [a for a,c in zip(assump, soft) if a.value() or c.value()]
+            for to_add in sorted(set(assump) - set(mss), key=seen_map.get):
+                if s.solve(assumptions=mss + [to_add]) is True:
+                    mss.append(to_add)
+            mcs = [a for a in assump if a not in frozenset(mss)] # take complement
+            map_solver += cp.any(mcs) # block in map solver
+
+            if return_mcs:
+                yield "MCS", [dmap[a] for a in mcs]
+
+
+        else: # UNSAT, shrink to MUS, re-use MUSX
+            # TODO (done): shrink with already seen constraints first (we want to remove similarity in MUSes) 
+
+            core = set(s.get_core())
+            for c in sorted(core, key=seen_map.get, reverse=True):
+                if c not in core: # already removed
+                    continue
+                core.remove(c)
+                if s.solve(assumptions=list(core)):
+                    core.add(c)
+                else: # UNSAT, shrink to new solver core (clause set refinement)
+                    core = set(s.get_core())
+
+            map_solver += ~cp.all(core) # block in map solver
+            
+            for a in core:
+                seen_map[a] += 1
+
+            if return_mus:
+                yield "MUS", [dmap[a] for a in core]
+
+
+        # ensure solution hint is still active
+        #TODO (done): make solution hint towards non seen constraints
+        if do_solution_hint:
+            for i, a in enumerate(assump):
+                if seen_map[a] >= 1:
+                    hint[i] = 0
+            map_solver.solution_hint(assump, hint)
 
 
 # a modified version of marco where the map solver, grow and shrink are optimized towards diversity with the help of ocus
