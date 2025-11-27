@@ -103,6 +103,7 @@ def marco_diverse_greedy(soft, hard=[], solver="exact", map_solver="exact", retu
     # deletion_order = {a :seen_map[a] for a in assump}
     # keep a map of which constraints are seen in previously generated MUSes
     seen_map = dict(zip(assump, [0]*len(assump)))
+    seen = [0]*len(assump)
     
     while map_solver.solve():
 
@@ -142,17 +143,17 @@ def marco_diverse_greedy(soft, hard=[], solver="exact", map_solver="exact", retu
             
             for a in core:
                 seen_map[a] += 1
+            
+            seen = [seen_map[a] for a in assump]
 
             if return_mus:
                 yield "MUS", [dmap[a] for a in core]
 
+        map_solver.minimize(cp.sum(seen*assump))
 
         # ensure solution hint is still active
         #TODO (done): make solution hint towards non seen constraints
         if do_solution_hint:
-            for i, a in enumerate(assump):
-                if seen_map[a] >= 1:
-                    hint[i] = 0
             map_solver.solution_hint(assump, hint)
 
 
