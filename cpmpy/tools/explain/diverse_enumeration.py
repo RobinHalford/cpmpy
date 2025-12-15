@@ -1,6 +1,7 @@
 import cpmpy as cp
 import numpy as np
 from .marco import marco
+from .mus import optimal_mus
 from .utils import make_assump_model, diversity, diversity_matrix
 from itertools import combinations
 from cpmpy.transformations.get_variables import get_variables
@@ -75,13 +76,13 @@ def marco_until_diverse(constraints, k, i):
 
 
 # enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
-def ocus_enum():
+def ocus_enum(soft, hard=[], solver="exact", hs_solver="ortools", do_solution_hint=True):
     return
 
 
 # a modified version of marco where the grow and shrink procedures select constraints first that would make it more diverse
 # and the solution hint is set to promote unseen constraints
-def marco_diverse_greedy(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True):
+def marco_diverse(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True):
 
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
 
@@ -155,11 +156,6 @@ def marco_diverse_greedy(soft, hard=[], solver="exact", map_solver="exact", retu
         #TODO (done): make solution hint towards non seen constraints
         if do_solution_hint:
             map_solver.solution_hint(assump, hint)
-
-
-# a modified version of marco where the map solver, grow and shrink are optimized towards diversity with the help of ocus
-def marco_diverse_ocus():
-    return
 
 
 
