@@ -66,8 +66,8 @@ def diversity(set1, set2, measure="overlap", c_size = 0):
 
     if c_size != 0:
         assert (s1 <= c_size) & (s2 <= c_size), "Size of a subset can not be bigger than its superset."
-        sim = common / c_size
-        score = 1 - sim
+        union = s1 + s2 - common
+        score = (union - common) / c_size
         return score
 
     if measure in ("Jaccard", "Jaccard index"):
