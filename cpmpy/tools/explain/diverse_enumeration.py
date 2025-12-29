@@ -1,6 +1,7 @@
 import cpmpy as cp
 import numpy as np
 from .marco import marco
+from .mus import optimal_mus
 from .utils import make_assump_model, diversity, diversity_matrix
 from itertools import combinations
 from cpmpy.transformations.get_variables import get_variables
@@ -75,13 +76,13 @@ def marco_until_diverse(constraints, k, i):
 
 
 # enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
-def ocus_enum():
+def ocus_enum(soft, hard=[], solver="exact", hs_solver="ortools", do_solution_hint=True):
     return
 
 
 # a modified version of marco where the grow and shrink procedures select constraints first that would make it more diverse
 # and the solution hint is set to promote unseen constraints
-def marco_diverse_greedy(soft, hard=[], solver="ortools", map_solver="ortools", return_mus=True, return_mcs=False, do_solution_hint=True):
+def marco_diverse(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True):
 
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
 
@@ -103,6 +104,7 @@ def marco_diverse_greedy(soft, hard=[], solver="ortools", map_solver="ortools", 
     # deletion_order = {a :seen_map[a] for a in assump}
     # keep a map of which constraints are seen in previously generated MUSes
     seen_map = dict(zip(assump, [0]*len(assump)))
+    seen = [0]*len(assump)
     
     while map_solver.solve():
 
@@ -142,23 +144,18 @@ def marco_diverse_greedy(soft, hard=[], solver="ortools", map_solver="ortools", 
             
             for a in core:
                 seen_map[a] += 1
+            
+            seen = [seen_map[a] for a in assump]
 
             if return_mus:
                 yield "MUS", [dmap[a] for a in core]
 
+        map_solver.minimize(cp.sum(seen*assump))
 
         # ensure solution hint is still active
         #TODO (done): make solution hint towards non seen constraints
         if do_solution_hint:
-            for i, a in enumerate(assump):
-                if seen_map[a] >= 1:
-                    hint[i] = 0
             map_solver.solution_hint(assump, hint)
-
-
-# a modified version of marco where the map solver, grow and shrink are optimized towards diversity with the help of ocus
-def marco_diverse_ocus():
-    return
 
 
 
