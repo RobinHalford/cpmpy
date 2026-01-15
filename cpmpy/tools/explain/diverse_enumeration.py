@@ -1,7 +1,7 @@
 import cpmpy as cp
 import numpy as np
 from .marco import marco
-from .mus import optimal_mus
+from .mus import optimal_mus, smus
 from .utils import make_assump_model, diversity, diversity_matrix
 from itertools import combinations
 from cpmpy.transformations.get_variables import get_variables
@@ -75,10 +75,6 @@ def marco_until_diverse(constraints, k, i):
     return top_indx, top_muses, avg, div_matrix
 
 
-# enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
-def ocus_enum(soft, hard=[], solver="exact", hs_solver="ortools", do_solution_hint=True):
-    return
-
 
 # a modified version of marco where the grow and shrink procedures select constraints first that would make it more diverse
 # and the solution hint is set to promote unseen constraints
@@ -92,19 +88,17 @@ def marco_diverse(soft, hard=[], solver="exact", map_solver="exact", return_mus=
 
     # map solver for computing hitting sets
     map_solver = cp.SolverLookup.get(map_solver)
-    do_solution_hint = do_solution_hint and hasattr(map_solver, 'solution_hint')  # solver may not support solution hinting...
 
     map_solver += cp.any(assump)
-    if do_solution_hint:
-        hint = [1]*len(assump)
-        map_solver.solution_hint(assump, hint) # we want large subsets, more likely to be a MUS
+
+    if do_solution_hint and hasattr(map_solver, 'solution_hint'):
+        map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
 
     # TODO (done): make deletion order based on already seen constraints
     # deletion_order = {a : -len(get_variables(dmap[a])) for a in assump} # avoid recomputing
     # deletion_order = {a :seen_map[a] for a in assump}
     # keep a map of which constraints are seen in previously generated MUSes
-    seen_map = dict(zip(assump, [0]*len(assump)))
-    seen = [0]*len(assump)
+    seenmap = dict(zip(assump, [0]*len(assump)))
     
     while map_solver.solve():
 
@@ -117,7 +111,7 @@ def marco_diverse(soft, hard=[], solver="exact", map_solver="exact", return_mus=
             # Assumptions encode indicator constraints a -> c, find all true assumptions
             #    and those that could just as well be made true given the current solution
             mss = [a for a,c in zip(assump, soft) if a.value() or c.value()]
-            for to_add in sorted(set(assump) - set(mss), key=seen_map.get):
+            for to_add in sorted(set(assump) - set(mss), key=seenmap.get):
                 if s.solve(assumptions=mss + [to_add]) is True:
                     mss.append(to_add)
             mcs = [a for a in assump if a not in frozenset(mss)] # take complement
@@ -131,7 +125,7 @@ def marco_diverse(soft, hard=[], solver="exact", map_solver="exact", return_mus=
             # TODO (done): shrink with already seen constraints first (we want to remove similarity in MUSes) 
 
             core = set(s.get_core())
-            for c in sorted(core, key=seen_map.get, reverse=True):
+            for c in sorted(core, key=seenmap.get, reverse=True):
                 if c not in core: # already removed
                     continue
                 core.remove(c)
@@ -143,24 +137,66 @@ def marco_diverse(soft, hard=[], solver="exact", map_solver="exact", return_mus=
             map_solver += ~cp.all(core) # block in map solver
             
             for a in core:
-                seen_map[a] += 1
-            
-            seen = [seen_map[a] for a in assump]
+                seenmap[a] += 1
 
             if return_mus:
                 yield "MUS", [dmap[a] for a in core]
 
-        map_solver.minimize(cp.sum(seen*assump))
+        map_solver.minimize(cp.sum([seenmap[a] for a in assump]*assump))
 
-        # ensure solution hint is still active
-        #TODO (done): make solution hint towards non seen constraints
-        if do_solution_hint:
-            map_solver.solution_hint(assump, hint)
 
+
+# enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
+# and block the previously found MUSes in the hitting set solver
+# ORTOOLS appears to be faster here than the exact solver for hitting set computation
+def ocus_enum(soft, hard=[], solver="exact", hs_solver="ortools"):
+    
+    assert hasattr(cp.SolverLookup.get(solver), "get_core"), f"optimal_mus requires a solver that supports assumption variables, use optimal_mus_naive with {solver} instead"
+    model, soft, assump = make_assump_model(soft, hard)
+    dmap = dict(zip(assump, soft))
+    seenmap = dict(zip(assump, [1]*len(assump)))
+    
+    s = cp.SolverLookup.get(solver, model)
+    assert s.solve(assumptions=assump) is False
+
+    # initialize hitting set solver
+    hs_solver = cp.SolverLookup.get(hs_solver)
+
+    # generate MUSes loop
+    while True:
+        seen = [seenmap[a] for a in assump]
+        hs_solver.minimize(cp.sum(assump * np.array(seen)))
+
+        # hitting set loop
+        while hs_solver.solve() is True:
+            hitting_set = [a for a in assump if a.value()]
+            if s.solve(assumptions=hitting_set) is False:
+                break
+
+            # else, the hitting set is SAT, now try to extend it without extra solve calls.
+            # Check which other assumptions/constraints are satisfied (using c.value())
+            # complement of grown subset is a correction subset
+            # Assumptions encode indicator constraints a -> c, find all false assumptions
+            #   that really have to be false given the current solution.
+            new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
+            hs_solver += cp.sum(new_corr_subset) >= 1
+
+            # greedily search for other corr subsets disjoint to this one
+            sat_subset = list(new_corr_subset)
+            while s.solve(assumptions=sat_subset) is True:
+                new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
+                sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
+                hs_solver += cp.sum(new_corr_subset) >= 1 # add new corr subset to hitting set solver
+        inc = len(hitting_set)
+        for a in hitting_set:
+            seenmap[a] += inc
+        # block found MUS in hitting set solver
+        hs_solver += ~cp.all(hitting_set)
+        yield [dmap[a] for a in hitting_set]
+    
 
 
 # helper function
-
 def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
     """
         Returns a tuple with the indeces of the top-k highest average in the matrix.
