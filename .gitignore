@@ -146,3 +146,6 @@ bugs/
 *.veripb
 *.opb
 *.pbp
+
+
+vendor/
