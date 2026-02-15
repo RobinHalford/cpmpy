@@ -1,5 +1,3 @@
-import unittest
-
 import cpmpy as cp
 from cpmpy.exceptions import NotSupportedError
 from cpmpy import SolverLookup
@@ -11,6 +9,8 @@ import pytest
 class TestSolutionHinting:
 
     def test_hints(self, solver):
+        if solver == "rc2":
+            pytest.skip("does not support solution hints")
 
         a,b = cp.boolvar(shape=2)
         model = cp.Model(a | b)
@@ -46,6 +46,7 @@ class TestSolutionHinting:
         slv.solution_hint([a,b], [False,False])
         assert slv.solve(**args) # should also work with an UNSAT hint
 
-        slv.solution_hint([a,[b]], [[[False]], True]) # check nested lists
-        assert slv.solve(**args)
+        # disabled, does not match type hints of `def solution_hint`
+        # slv.solution_hint([a,[b]], [[[False]], True]) # check nested lists
+        # assert slv.solve(**args)
 

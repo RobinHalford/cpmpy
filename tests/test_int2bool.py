@@ -1,16 +1,14 @@
 import pytest
+import itertools
 
-from utils import skip_on_missing_pblib
+from cpmpy import SolverLookup
+from cpmpy.expressions.core import BoolVal, Comparison, Operator
+from cpmpy.expressions.utils import argvals
+from cpmpy.expressions.variables import _BoolVarImpl, _IntVarImpl, boolvar, intvar
+from cpmpy.model import Model
 from cpmpy.transformations.flatten_model import flatten_constraint
 from cpmpy.transformations.get_variables import get_variables
-from cpmpy.expressions.core import Comparison, Operator, BoolVal
-from cpmpy.expressions.utils import argvals
-from cpmpy.model import Model
-from cpmpy import SolverLookup
-
 from cpmpy.transformations.int2bool import int2bool
-from cpmpy.expressions.variables import _IntVarImpl, _BoolVarImpl, intvar, boolvar
-
 
 # add some small but non-trivial integer variables (i.e. non-zero lower bounds, domain size not a power of two)
 x = intvar(1, 3, name="x")
@@ -83,8 +81,6 @@ def setup():
 
 
 class TestTransInt2Bool:
-    import importlib
-    import itertools
 
     def idfn(val):
         if isinstance(val, tuple):
@@ -94,14 +90,13 @@ class TestTransInt2Bool:
             return f"{val}"
 
     @pytest.mark.requires_solver("pindakaas", "pysat")
-    @skip_on_missing_pblib(skip_on_exception_only=True)
     @pytest.mark.parametrize(
         ("constraint", "encoding"),
         itertools.product(CONSTRAINTS, ENCODINGS),
         ids=idfn,
     )
     def test_transforms(self, solver, constraint, encoding, setup):
-        user_vars = set(get_variables(constraint))
+        user_vars = tuple(get_variables(constraint))
         ivarmap = dict()
         flat = int2bool(flatten_constraint(constraint), ivarmap=ivarmap, encoding=encoding)
 
@@ -119,10 +114,9 @@ class TestTransInt2Bool:
         for c in flat:
             solver.add(c)
 
-        # unfortunately, some tricky edge cases where trivial constraints remove their variables by using the above `add` method
-        # this only happens in this test set-up
-        # to fix this, we add user variables which may have been removed!
-        solver.user_vars |= user_vars
+        # ensure all user vars are known to the CNF solver
+        for x in user_vars:
+            solver.add(x == x)
 
         solver.ivarmap = ivarmap
         solver.solveAll(display=lambda: flat_sols.append(tuple(argvals(user_vars))))
