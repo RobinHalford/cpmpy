@@ -262,22 +262,52 @@ def nurserostering_model(horizon, shifts:pd.DataFrame, staff, days_off, shift_on
     return model, nurse_view
 
 
-def create_unsat_nr_model(i, difficulty_factor):
+def execute_unsat_nr_models(difficulty_factor):
     dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
-    data, metadata = dataset[i]
-    model, nurse_view = nurserostering_model(**data, difficulty_factor=difficulty_factor)
-    return model, nurse_view, metadata
+    fieldnames = ["instance", "algorithm", "solver", "map_solver", "hit_solver", "runtimes", "status", "MUSes", "error_message"]
+    result = dict.fromkeys(fieldnames)   # initialize result dict with empty values
+    data0, metadata0 = dataset[0]
+    print(metadata0)
+    # result["instance"] = []
+    for i in range(0,4):
+        data, metadata = dataset[i]
+        model, nurse_view = nurserostering_model(**data, difficulty_factor=difficulty_factor)
+        model.solve(time_limit=60, solver="ortools")
+    
    
 
 
 # SAT COMPETITION HELPER FUNCTIONS
 def enum_sat_competition_instances():
-    with open("cpmpy/tools/explain/experiments_diverse/sat_competition_instances.txt", "r") as f:
+    with open("cpmpy/tools/explain/experiments_diverse/data/unsat_instances_2025.uri", "r") as f:
+        count = 0
         for line in f:
             url = line.strip()
             if not url:
                 continue
             else:
-                print(url)
+                # load instance from url and yield model
+                try:
+                    # download file to temporary location
+                    tmp_path = pathlib.Path("cpmpy/tools/explain/experiments_diverse/data/satcompinstances/tmp_instance_" + str(count) + ".txt")
+                    urlretrieve(url, str(tmp_path))
+                    count += 1
+                except (HTTPError, URLError) as e:
+                    raise ValueError(f"No dataset available on {url}. Error: {str(e)}")
     return
  
+
+"""
+ def get_filename_from_uri(url, response):
+    # 1) Try Content-Disposition header
+    cd = response.headers.get("Content-Disposition")
+    if cd:
+        match = FILENAME_RE.search(cd)
+        if match:
+            return pathlib.Path(match.group(1)).name
+
+    # 2) Fallback: last part of URL path
+    path = urlparse(url).path
+    name = pathlib.Path(path).name
+    return name if name else "downloaded_file"
+"""
