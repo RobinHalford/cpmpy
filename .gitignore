@@ -148,5 +148,6 @@ bugs/
 *.opb
 *.pbp
 
-
+results/
 vendor/
+cpmpy/tools/explain/experiments_diverse/data/
