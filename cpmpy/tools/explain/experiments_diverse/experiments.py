@@ -11,7 +11,7 @@ Required Arguments
 --map-solver : str
     The name of the map-solver to benchmark (e.g., "ortools", "exact", "choco").
 
---hit-solver : str
+--hs-solver : str
     The name of the hitting set solver to benchmark (e.g., "ortools", "gurobi").
 
 
@@ -21,13 +21,10 @@ Optional Arguments
 --time-limit : int, default=60
     Time limit in seconds per instance.
 
---mem-limit : int, default=8192
-    Memory limit in megabytes per instance.
-
 --output-dir : str, default='results'
     Directory where result CSV files will be saved.
-
 """
+
 import sys
 import os
 import time
@@ -45,8 +42,6 @@ warnings.simplefilter(action='ignore', category=UserWarning)
 from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, enum_sat_competition_instances
 
 
-
-
 # sat competition experiments
 
 def load_sat_competition_instances():
@@ -55,8 +50,8 @@ def load_sat_competition_instances():
     
 
 def benchmark_NR(num_mus: int, solver: str, 
-                 map_solver: str, hit_solver: str,
-                 time_limit: int = 60, mem_limit: int = 8192,
+                 map_solver: str, hs_solver: str,
+                 time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
     Benchmark diverse MUS enumeration on Nurse Rostering instances.
@@ -72,7 +67,13 @@ def benchmark_NR(num_mus: int, solver: str,
     # Define output file path with timestamp
     output_file = str(output_dir / f"diverse_NR_{timestamp}.csv")
     # execute experiments 
-    execute_unsat_nr_models(difficulty_factor=0.8)
+    execute_unsat_nr_models(num_mus=num_mus, 
+                            solver=solver, 
+                            map_solver=map_solver, 
+                            hs_solver=hs_solver,
+                            difficulty_factor=0.5,
+                            time_limit=time_limit,
+                            output_file=output_file)
 
 
 if __name__ == "__main__":
@@ -80,9 +81,8 @@ if __name__ == "__main__":
     parser.add_argument('--num-mus', type=int, required=True, help="The number of diverse MUSes to enumerate for each instance.")
     parser.add_argument('--solver', type=str, required=True, help="The solver to use.")
     parser.add_argument('--map-solver', type=str, required=True, help="The map-solver to use.")
-    parser.add_argument('--hit-solver', type=str, required=True, help="The hitting set solver to use.")
+    parser.add_argument('--hs-solver', type=str, required=True, help="The hitting set solver to use.")
     parser.add_argument('--time-limit', type=int, default=60, help="Time limit in seconds per instance.")
-    parser.add_argument('--mem-limit', type=int, default=8192, help="Memory limit in MB per instance.")
     parser.add_argument('--output-dir', type=str, default='results', help="Directory where result CSV files will be saved.")
     args = parser.parse_args()
 
