@@ -71,7 +71,7 @@ def benchmark_NR(num_mus: int, solver: str,
                             solver=solver, 
                             map_solver=map_solver, 
                             hs_solver=hs_solver,
-                            difficulty_factor=0.5,
+                            difficulty_factor=0.1,
                             time_limit=time_limit,
                             output_file=output_file)
 
