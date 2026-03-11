@@ -142,3 +142,17 @@ def diversity_matrix(list_of_sets, measure="overlap", c_size=0):
         divs[i, j] = diversity(a, b, measure, c_size)
 
     return divs
+
+
+def average_diversity(list_of_sets, measure="overlap", c_size=0):
+    """
+        Computes the average pairwise diversity between all the sets of `list_of_sets`.
+        The value is the average of all the values in the upper triangular of the diversity matrix.
+
+        :param: list_of_sets: A list of sets for which the average diversity will be computed
+        :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")
+        :param: c_size: the size of C (set of all constraints), use this when you want to normalize the diversity with |C|. Measure is ignored if you use this parameter. 
+    """
+    divs = diversity_matrix(list_of_sets, measure, c_size)
+    avg = divs[np.triu_indices_from(divs, k=1)].mean()
+    return avg
