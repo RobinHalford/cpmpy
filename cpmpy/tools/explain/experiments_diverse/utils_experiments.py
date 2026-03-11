@@ -13,10 +13,12 @@ from urllib.request import urlretrieve
 from urllib.error import HTTPError, URLError
 import zipfile
 import csv
+import pickle
 from filelock import FileLock
 import pandas as pd
 import time
 from cpmpy.tools.explain.diverse_enumeration import marco_assumps, marco_diverse, marco_diverse_no_min, ocus_enum
+from cpmpy.tools.explain.utils import average_diversity
 
 
 try:
@@ -365,7 +367,38 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
                         os.remove(lock_file)
                     except Exception:
                         pass
-    
+
+
+def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
+    filenames = pd.read_csv("cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv", usecols=["filename"])["filename"].tolist()
+    # for now only run on 1 instance for testing
+    for filename in filenames[:1]:
+        # load instance from pickle file
+        path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
+        print(f"Processing file: {filename}")
+        model = cp.Model().from_file(path)
+        print("loaded model")
+        assert model.solve(time_limit=60, solver="ortools") is False
+        print("asserted model is unsat")
+        print(model.status())
+        generator = enumerate(marco_assumps(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
+        muses = []
+        for c in model.constraints:
+            print(c)
+        print("done")
+        """
+        while True:
+            try:
+                j, (_, subset) = next(generator)
+                print("found a MUS")
+            except StopIteration:
+                break
+            muses.append(subset)
+            if j == num_mus - 1:
+                break
+        diversity = average_diversity(muses)
+        print(f"Found {len(muses)} MUSes with average pairwise diversity of {diversity:.4f}")
+        """
 
 # SAT COMPETITION HELPER FUNCTIONS
 def enum_sat_competition_instances():
