@@ -314,7 +314,7 @@ def execute_solver_combinations(time_limit: int, output_file_NR: str, output_fil
     # print("finished NR instance")
     # now a xcsp instance
     filenames = pd.read_csv("cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv", usecols=["filename"])["filename"].tolist()
-    filename = filenames[0]
+    filename = filenames[22]
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
     print(f"Processing file: {filename}")
     model = cp.Model().from_file(path)
