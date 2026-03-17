@@ -302,7 +302,7 @@ def write_results_to_csv(result, fieldnames, output_file):
 
 def execute_solver_combinations(time_limit: int, output_file_NR: str, output_file_xcsp: str):
     dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
-    data, metadata = dataset[1]
+    data, metadata = dataset[0]
     model, _ = nurserostering_model(**data)
     print("created sat model")
     optimal = get_optimal(model, time_limit=time_limit, solver="exact")
@@ -342,7 +342,7 @@ def execute_solver_combination_instance(instance, model, time_limit: int, output
                     result["solver"] = solver
                     result["map_solver"] = map_solver
                     result["hs_solver"] = None
-                    generator = enumerate(marco(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False))
+                    generator = enumerate(marco_assumps(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=20))
                     try:
                         runtimes = []
                         start_time = time.time()
