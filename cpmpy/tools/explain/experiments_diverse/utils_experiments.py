@@ -301,17 +301,17 @@ def write_results_to_csv(result, fieldnames, output_file):
 
 
 def execute_solver_combinations(time_limit: int, output_file_NR: str, output_file_xcsp: str):
-    dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
-    data, metadata = dataset[0]
-    model, _ = nurserostering_model(**data)
-    print("created sat model")
-    optimal = get_optimal(model, time_limit=time_limit, solver="exact")
-    print(f"found optimal value: {optimal}")
-    model = create_unsat_model(model, optimal, 0.1)
-    print("created unsat model")
-    instance = metadata["name"]
-    execute_solver_combination_instance(instance, model, time_limit, output_file_NR)
-    print("finished NR instance")
+    # dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
+    # data, metadata = dataset[0]
+    # model, _ = nurserostering_model(**data)
+    # print("created sat model")
+    # optimal = get_optimal(model, time_limit=time_limit, solver="exact")
+    # print(f"found optimal value: {optimal}")
+    # model = create_unsat_model(model, optimal, 0.1)
+    # print("created unsat model")
+    # instance = metadata["name"]
+    # execute_solver_combination_instance(instance, model, time_limit, output_file_NR)
+    # print("finished NR instance")
     # now a xcsp instance
     filenames = pd.read_csv("cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv", usecols=["filename"])["filename"].tolist()
     filename = filenames[0]
@@ -329,9 +329,9 @@ def execute_solver_combinations(time_limit: int, output_file_NR: str, output_fil
 def execute_solver_combination_instance(instance, model, time_limit: int, output_file: str):
     fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status","num_mus", "runtimes", "error_message"]
     algorithms = ["marco", "ocus"]
-    solvers = ["ortools", "exact", "pysat","z3"]
-    map_solvers = ["ortools", "exact", "pysat","z3", "gurobi"]
-    hs_solvers = ["ortools", "exact", "pysat","z3", "gurobi"]
+    solvers = ["ortools", "exact", "pysat"]
+    map_solvers = ["ortools", "exact", "pysat", "gurobi"]
+    hs_solvers = ["ortools", "exact", "gurobi"]
     for algorithm in algorithms:
         if algorithm == "marco":
             for solver in solvers:
