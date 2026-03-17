@@ -39,10 +39,10 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
-from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances , enum_sat_competition_instances
+from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances , enum_sat_competition_instances, execute_solver_combinations
 
 
-def test_solver_combinations(time_limit: int, output_dir: str) -> str:
+def test_solver_combinations(time_limit: int, output_dir: str):
     """
     Test different combinations of solvers and map-solvers on a small set of instances to identify promising configurations for the full benchmarks.
 
@@ -55,8 +55,10 @@ def test_solver_combinations(time_limit: int, output_dir: str) -> str:
     # Get current timestamp in a filename-safe format
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # Define output file path with timestamp
-    output_file = str(output_dir / f"solver_combinations_{timestamp}.csv")
-    return output_file
+    output_file_NR = str(output_dir / f"solver_combinations_NR_{timestamp}.csv")
+    output_file_xcsp = str(output_dir / f"solver_combinations_xcsp_{timestamp}.csv")
+    execute_solver_combinations(time_limit=time_limit, output_file_NR=output_file_NR, output_file_xcsp=output_file_xcsp)
+    return
 
 
 # sat competition experiments
@@ -133,8 +135,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # use **vars(args) to pass all arguments to the benchmark functions
-    # test_solver_combinations()
-    benchmark_NR(**vars(args))
+    test_solver_combinations(200,"results")
+    # benchmark_NR(**vars(args))
     # benchmark_sat_competition(**vars(args))
     # benchmark_xcsp_MUS(**vars(args))
 

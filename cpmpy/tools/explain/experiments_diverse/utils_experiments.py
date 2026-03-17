@@ -17,6 +17,8 @@ import pickle
 from filelock import FileLock
 import pandas as pd
 import time
+from cpmpy.tools.explain import marco
+from cpmpy.tools.explain.mus import smus 
 from cpmpy.tools.explain.diverse_enumeration import marco_assumps, marco_diverse, marco_diverse_no_min, ocus_enum
 from cpmpy.tools.explain.utils import average_diversity
 
@@ -277,6 +279,110 @@ def create_unsat_model(model, optimal, difficulty_factor):
     return model
 
 
+def write_results_to_csv(result, fieldnames, output_file):
+    # write results to csv
+    lock_file = f"{output_file}.lock"
+    lock = FileLock(lock_file)
+    try:
+        with lock:
+            write_header = not os.path.exists(output_file)
+            with open(output_file, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(result)
+    finally:
+        if os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+            except Exception:
+                pass
+
+
+
+def execute_solver_combinations(time_limit: int, output_file_NR: str, output_file_xcsp: str):
+    dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
+    data, metadata = dataset[1]
+    model, _ = nurserostering_model(**data)
+    print("created sat model")
+    optimal = get_optimal(model, time_limit=time_limit, solver="exact")
+    print(f"found optimal value: {optimal}")
+    model = create_unsat_model(model, optimal, 0.1)
+    print("created unsat model")
+    instance = metadata["name"]
+    execute_solver_combination_instance(instance, model, time_limit, output_file_NR)
+    print("finished NR instance")
+    # now a xcsp instance
+    filenames = pd.read_csv("cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv", usecols=["filename"])["filename"].tolist()
+    filename = filenames[0]
+    path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
+    print(f"Processing file: {filename}")
+    model = cp.Model().from_file(path)
+    print("loaded model")
+    instance = filename
+    execute_solver_combination_instance(instance, model, time_limit, output_file_xcsp)
+    print("finished xcsp instance")
+    return
+
+
+
+def execute_solver_combination_instance(instance, model, time_limit: int, output_file: str):
+    fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status","num_mus", "runtimes", "error_message"]
+    algorithms = ["marco", "ocus"]
+    solvers = ["ortools", "exact", "pysat","z3"]
+    map_solvers = ["ortools", "exact", "pysat","z3", "gurobi"]
+    hs_solvers = ["ortools", "exact", "pysat","z3", "gurobi"]
+    for algorithm in algorithms:
+        if algorithm == "marco":
+            for solver in solvers:
+                for map_solver in map_solvers:
+                    result = dict.fromkeys(fieldnames)   # initialize result dict with empty values   
+                    result["instance"] = instance
+                    result["algorithm"] = algorithm
+                    result["solver"] = solver
+                    result["map_solver"] = map_solver
+                    result["hs_solver"] = None
+                    generator = enumerate(marco(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False))
+                    try:
+                        runtimes = []
+                        start_time = time.time()
+                        for j, (_, subset) in generator:
+                            runtimes.append(time.time() - start_time)
+                            if time.time() - start_time > time_limit:
+                                result["status"] = "TIMEOUT"
+                                break
+                        else:
+                            result["status"] = "COMPLETE"
+                        result["num_mus"] = j + 1
+                        result["runtimes"] = runtimes
+                    except Exception as e:
+                        result["status"] = "error"
+                        result["error_message"] = str(e)
+                    write_results_to_csv(result, fieldnames, output_file)
+        elif algorithm == "ocus":
+            for solver in solvers:
+                for hs_solver in hs_solvers:
+                    result = dict.fromkeys(fieldnames)   # initialize result dict with empty values   
+                    result["instance"] = instance
+                    result["algorithm"] = algorithm
+                    result["solver"] = solver
+                    result["map_solver"] = None
+                    result["hs_solver"] = hs_solver
+                    # just OCUS, no enumeration
+                    start_time = time.time()
+                    try:
+                        mus = smus(model.constraints, solver=solver, hs_solver=hs_solver)
+                        runtime = time.time() - start_time
+                        result["status"] = "COMPLETE"
+                        result["num_mus"] = 1
+                        result["runtimes"] = [runtime]
+                    except Exception as e:
+                        result["status"] = "error"
+                        result["error_message"] = str(e)
+                    write_results_to_csv(result, fieldnames, output_file)
+
+
+
 def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_factor, time_limit, output_file):
     dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
     fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
@@ -350,23 +456,7 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
                     result["map_solver"] = None
                 result["status"] = "error"
                 result["error_message"] = str(e)
-            # write results to csv
-            lock_file = f"{output_file}.lock"
-            lock = FileLock(lock_file)
-            try:
-                with lock:
-                    write_header = not os.path.exists(output_file)
-                    with open(output_file, 'a', newline='') as f:
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        if write_header:
-                            writer.writeheader()
-                        writer.writerow(result)
-            finally:
-                if os.path.exists(lock_file):
-                    try:
-                        os.remove(lock_file)
-                    except Exception:
-                        pass
+            write_results_to_csv(result, fieldnames, output_file)
 
 
 def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
