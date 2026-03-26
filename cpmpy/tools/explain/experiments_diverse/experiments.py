@@ -98,7 +98,7 @@ def benchmark_NR(num_mus: int, solver: str,
 
 def benchmark_xcsp_MUS(num_mus: int, solver: str, 
                  map_solver: str, hs_solver: str,
-                 time_limit: int = 60,
+                 time_limit: int = 120,
                  output_dir: str = 'results') -> str:
     """
     Benchmark diverse MUS enumeration on selection of XCSP instances from 
@@ -125,22 +125,19 @@ def benchmark_xcsp_MUS(num_mus: int, solver: str,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Benchmark diverse MUS enumeration given the solver and map-solver to use.")
+    parser = argparse.ArgumentParser(description="Benchmark diverse MUS enumeration given the solvers to use.")
     parser.add_argument('--num-mus', type=int, required=True, help="The number of diverse MUSes to enumerate for each instance.")
-    parser.add_argument('--solver', type=str, required=True, help="The solver to use.")
+    parser.add_argument('--solver', type=str, required=True, help="The SAT solver to use.")
     parser.add_argument('--map-solver', type=str, required=True, help="The map-solver to use.")
     parser.add_argument('--hs-solver', type=str, required=True, help="The hitting set solver to use.")
-    parser.add_argument('--time-limit', type=int, default=60, help="Time limit in seconds per instance.")
+    parser.add_argument('--time-limit', type=int, default=120, help="Time limit in seconds per instance.")
     parser.add_argument('--output-dir', type=str, default='results', help="Directory where result CSV files will be saved.")
     args = parser.parse_args()
 
     # use **vars(args) to pass all arguments to the benchmark functions
-    test_solver_combinations(200,"results")
+    # test_solver_combinations(200,"results")
     # benchmark_NR(**vars(args))
     # benchmark_sat_competition(**vars(args))
-    # benchmark_xcsp_MUS(**vars(args))
-
-
-
+    benchmark_xcsp_MUS(**vars(args))
     # experiments_NR()
     # load_sat_competition_instances()
