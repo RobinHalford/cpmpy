@@ -228,7 +228,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
     fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
     algorithms = ["marco", "marco_diverse_noMin", "marco_diverse_min", "ocus_enum1", "ocus_enum_shrink"]
 
-    for filename in filenames[:1]:
+    for filename in filenames[42]:
         # load instance from pickle file
         path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
         print(f"Processing file: {filename}")
