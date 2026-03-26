@@ -388,6 +388,8 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
             sat_subset = list(new_corr_subset)
             while True:
                 sat_result = timed_solve(s, deadline, assumptions=sat_subset)
+                if sat_result is None:
+                    return
                 if not sat_result:
                     break
                 new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
@@ -429,7 +431,7 @@ def ocus_enum_shrink_assump(soft, hard=[], solver="ortools", hs_solver="gurobi",
         hs_solver.minimize(cp.sum(assump * np.array(seen)))
 
         # hitting set loop
-        while hs_solver.solve(time_limit=time_limit) is True:
+        while True:
             if remaining_time() is not None and remaining_time() <= 0:
                 return
             hs_result = timed_solve(hs_solver, deadline)
@@ -456,6 +458,8 @@ def ocus_enum_shrink_assump(soft, hard=[], solver="ortools", hs_solver="gurobi",
             sat_subset = list(new_corr_subset)
             while True:
                 sat_result = timed_solve(s, deadline, assumptions=sat_subset)
+                if sat_result is None:
+                    return
                 if not sat_result:
                     break
 
@@ -463,6 +467,8 @@ def ocus_enum_shrink_assump(soft, hard=[], solver="ortools", hs_solver="gurobi",
                 sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
                 hs_solver += cp.sum(new_corr_subset) >= 1 # add new corr subset to hitting set solver
         
+        if hitting_set is None:
+            return
         # shrink to a MUS
         hitting_set = set(hitting_set)
         for c in sorted(hitting_set, key=seenmap.get, reverse=True):
