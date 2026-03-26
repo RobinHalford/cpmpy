@@ -72,14 +72,11 @@ def marco_assumps(soft, hard=[], solver="ortools", map_solver="ortools", return_
     deletion_order = {a : -len(get_variables(dmap[a])) for a in assump} # avoid recomputing
 
     while True:
-        # stop if ran out of time
-        if remaining_time() is not None and remaining_time() <= 0:
-            return
         
         map_result = timed_solve(map_solver, deadline)
         if map_result is None:
             return
-        if not map_result:
+        if map_result is False:
             return
         
         seed = [a for a in assump if a.value()]
@@ -165,14 +162,11 @@ def marco_diverse_Min_assump(soft, hard=[], solver="exact", map_solver="exact", 
     seenmap = dict(zip(assump, [0]*len(assump)))
     
     while True:
-        # stop if ran out of time
-        if remaining_time() is not None and remaining_time() <= 0:
-            return
         
         map_result = timed_solve(map_solver, deadline)
         if map_result is None:
             return
-        if not map_result:
+        if map_result is False:
             return
         
         seed = [a for a in assump if a.value()]
@@ -268,14 +262,11 @@ def marco_diverse_noMin_assump(soft, hard=[], solver="exact", map_solver="exact"
     seenmap = dict(zip(assump, [0]*len(assump)))
     
     while True:
-        # stop if ran out of time
-        if remaining_time() is not None and remaining_time() <= 0:
-            return
         
         map_result = timed_solve(map_solver, deadline)
         if map_result is None:
             return
-        if not map_result:
+        if map_result is False:
             return
         
         seed = [a for a in assump if a.value()]
@@ -362,8 +353,6 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
 
         # hitting set loop
         while True:
-            if remaining_time() is not None and remaining_time() <= 0:
-                return
             hs_result = timed_solve(hs_solver, deadline)
             if hs_result is None:
                 return
@@ -373,6 +362,8 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
             hitting_set = [a for a in assump if a.value()]
 
             sat_result = timed_solve(s, deadline, assumptions=hitting_set)
+            if sat_result is None:
+                return
             if sat_result is False:
                 break
 
@@ -390,7 +381,7 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
                 sat_result = timed_solve(s, deadline, assumptions=sat_subset)
                 if sat_result is None:
                     return
-                if not sat_result:
+                if sat_result is False:
                     break
                 new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
                 sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
@@ -431,20 +422,22 @@ def ocus_enum_shrink_assump(soft, hard=[], solver="ortools", hs_solver="gurobi",
         hs_solver.minimize(cp.sum(assump * np.array(seen)))
 
         # hitting set loop
+        unsat_hitting_set = None
         while True:
-            if remaining_time() is not None and remaining_time() <= 0:
-                return
             hs_result = timed_solve(hs_solver, deadline)
             if hs_result is None:
                 return
-            if not hs_result:
+            if hs_result is False:
                 break
             
             hitting_set = [a for a in assump if a.value()]
 
             sat_result = timed_solve(s, deadline, assumptions=hitting_set)
+            if sat_result is None:
+                return
             if sat_result is False:
-                break
+                unsat_hitting_set = hitting_set
+                break 
 
             # else, the hitting set is SAT, now try to extend it without extra solve calls.
             # Check which other assumptions/constraints are satisfied (using c.value())
@@ -460,17 +453,17 @@ def ocus_enum_shrink_assump(soft, hard=[], solver="ortools", hs_solver="gurobi",
                 sat_result = timed_solve(s, deadline, assumptions=sat_subset)
                 if sat_result is None:
                     return
-                if not sat_result:
+                if sat_result is False:
                     break
 
                 new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
                 sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
                 hs_solver += cp.sum(new_corr_subset) >= 1 # add new corr subset to hitting set solver
         
-        if hitting_set is None:
+        if unsat_hitting_set is None:
             return
         # shrink to a MUS
-        hitting_set = set(hitting_set)
+        hitting_set = set(unsat_hitting_set)
         for c in sorted(hitting_set, key=seenmap.get, reverse=True):
             if c not in hitting_set: # already removed
                 continue
