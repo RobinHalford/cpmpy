@@ -224,59 +224,64 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
 def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
     filenames = pd.read_csv("cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv", usecols=["filename"])["filename"].tolist()
     # for now only run on 1 instance for testing
+
+    fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
+    algorithms = ["marco", "marco_diverse_noMin", "marco_diverse_min", "ocus_enum1", "ocus_enum_shrink"]
+
     for filename in filenames[:1]:
         # load instance from pickle file
         path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
         print(f"Processing file: {filename}")
         
-        fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
-        for algorithm in ["marco"]: #,"marco_diverse_noMin", "marco_diverse_min", "ocus_enum1", "ocus_enum_shrink"]:
+        for algorithm in algorithms:
+            result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
             result["instance"] = filename
             result["algorithm"] = algorithm
-            model = cp.Model().from_file(path)
-            result = dict.fromkeys(fieldnames)   # initialize result dict with empty values
-            if algorithm in ["ocus_enum1", "ocus_enum_shrink"]:
-                result["map_solver"] = None
-                result["hs_solver"] = hs_solver
-            else:
-                result["hs_solver"] = None
-                result["map_solver"] = map_solver
             result["solver"] = solver
+            result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
+            result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
+            result["error_message"] = None
+            result["status"] = "STARTED"  # default unless proven otherwise
 
+            model = cp.Model().from_file(path)
+           
             runtimes = []
             muses = []
             
-            if algorithm == "marco":
-                generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
-            elif algorithm == "marco_diverse_noMin":
-                generator = marco_diverse_noMin_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
-            elif algorithm == "marco_diverse_min":
-                generator = marco_diverse_Min_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
-            elif algorithm == "ocus_enum1":
-                generator = ocus_enum_1_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
-            elif algorithm == "ocus_enum_shrink":
-                generator = ocus_enum_shrink_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
-            else:
-                raise ValueError(f"Unknown algorithm: {algorithm}")
-            
-            try: 
-                while True:
-                    step_start = time.time()
-                    j, (_, subset) = next(generator)
-                    muses.append(subset)
-                    runtimes.append(time.time() - step_start)
-                    # timeout check 
-                    if time.time() - step_start > time_limit:
+            try:
+                if algorithm == "marco":
+                    generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+                elif algorithm == "marco_diverse_noMin":
+                    generator = marco_diverse_noMin_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+                elif algorithm == "marco_diverse_min":
+                    generator = marco_diverse_Min_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+                elif algorithm == "ocus_enum1":
+                    generator = ocus_enum_1_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+                elif algorithm == "ocus_enum_shrink":
+                    generator = ocus_enum_shrink_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+                else:
+                    raise ValueError(f"Unknown algorithm: {algorithm}")
+
+                for status, subset, elapsed_time in generator:
+                    if status == "MUS":
+                        muses.append(subset)
+                        runtimes.append(elapsed_time)
+                        if len(muses) >= num_mus:
+                            result["status"] = "COMPLETE"
+                            break
+                    elif status == "MCS":
+                        # this should never happen
+                        raise ValueError(f"Received a MCS instead of MUS")
+                    elif status == "TIMEOUT":
                         result["status"] = "TIMEOUT"
                         break
-                    if j == num_mus - 1:
-                        result["status"] = "COMPLETE"
-                        break
-            except StopIteration:
-                    break
+                    else:
+                        raise ValueError(f"Unknown generator status: {status}")
+                    
             except Exception as e:
-                result["status"] = "error"
+                result["status"] = "ERROR"
                 result["error_message"] = str(e)
+            
             result["MUSes"] = muses
             result["runtimes"] = runtimes
             write_results_to_csv(result, fieldnames, output_file)
