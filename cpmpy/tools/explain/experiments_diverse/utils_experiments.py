@@ -240,6 +240,9 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
     try:
         model = cp.Model().from_file(path)
 
+        for c in model.constraints:
+            print(c + "\n")
+
         if algorithm == "marco":
             generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_noMin":
