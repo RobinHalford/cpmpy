@@ -363,6 +363,7 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
         hs_solver.minimize(cp.sum(assump * np.array(seen)))
 
         # hitting set loop
+        unsat_hitting_set = None
         while True:
             hs_result = timed_solve(hs_solver, deadline)
             if hs_result is None:
@@ -378,6 +379,7 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
                 yield "TIMEOUT", None, time.monotonic() - start_time
                 return
             if sat_result is False:
+                unsat_hitting_set = hitting_set
                 break
 
             # else, the hitting set is SAT, now try to extend it without extra solve calls.
@@ -400,6 +402,10 @@ def ocus_enum_1_assump(soft, hard=[], solver="ortools", hs_solver="gurobi", time
                 new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
                 sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
                 hs_solver += cp.sum(new_corr_subset) >= 1 # add new corr subset to hitting set solver
+                
+        if unsat_hitting_set is None:
+            return
+        hitting_set = set(unsat_hitting_set)
         inc = len(hitting_set)
         for a in hitting_set:
             seenmap[a] += inc

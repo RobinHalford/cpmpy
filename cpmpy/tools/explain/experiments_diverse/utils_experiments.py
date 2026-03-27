@@ -6,18 +6,15 @@ The `metadata` contains usefull information about the current problem instance.
 """
 import os
 import pathlib
-from io import StringIO
-from os.path import join
-from typing import Tuple, Any
 from urllib.request import urlretrieve
 from urllib.error import HTTPError, URLError
-import zipfile
 import csv
-import pickle
 from filelock import FileLock
+import gc
+import traceback
+import multiprocessing as mp
 import pandas as pd
 import time
-from cpmpy.tools.explain import marco
 from cpmpy.tools.explain.mus import smus 
 from cpmpy.tools.explain.diverse_enum_assumps import marco_assumps, marco_diverse_Min_assump, marco_diverse_noMin_assump, ocus_enum_1_assump, ocus_enum_shrink_assump
 from cpmpy.tools.explain.utils import average_diversity
@@ -221,77 +218,134 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
             write_results_to_csv(result, fieldnames, output_file)
 
 
-def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
-    filenames = pd.read_csv("cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv", usecols=["filename"])["filename"].tolist()
-    # for now only run on 1 instance for testing
-
+def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
+    
     fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
-    algorithms = ["marco", "marco_diverse_noMin", "marco_diverse_min", "ocus_enum1", "ocus_enum_shrink"]
 
+    result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
+    result["instance"] = filename
+    result["algorithm"] = algorithm
+    result["solver"] = solver
+    result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
+    result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
+    result["error_message"] = None
+    result["status"] = "STARTED"  # default unless proven otherwise
 
-
-    for filename in filenames:
-        # filename = filenames[42]
-
-        # load instance from pickle file
-        path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
-        print(f"Processing file: {filename}")
+    model = None
+    generator = None
+    
+    runtimes = []
+    muses = []
         
-        for algorithm in algorithms:
-            result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
+    try:
+        model = cp.Model().from_file(path)
+
+        if algorithm == "marco":
+            generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        elif algorithm == "marco_diverse_noMin":
+            generator = marco_diverse_noMin_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        elif algorithm == "marco_diverse_min":
+            generator = marco_diverse_Min_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        elif algorithm == "ocus_enum1":
+            generator = ocus_enum_1_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+        elif algorithm == "ocus_enum_shrink":
+            generator = ocus_enum_shrink_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+        else:
+            raise ValueError(f"Unknown algorithm: {algorithm}")
+
+        for status, subset, elapsed_time in generator:
+            if status == "MUS":
+                muses.append(subset)
+                runtimes.append(elapsed_time)
+                if len(muses) >= num_mus:
+                    result["status"] = "COMPLETE"
+                    break
+            elif status == "MCS":
+                # this should never happen
+                raise ValueError(f"Received a MCS instead of MUS")
+            elif status == "TIMEOUT":
+                result["status"] = "TIMEOUT"
+                break
+            else:
+                raise ValueError(f"Unknown generator status: {status}")
+        if result["status"] == "STARTED":
+            # In case generator ends naturally before num_mus
+            result["status"] = "EXHAUSTED"  
+    except Exception as e:
+        result["status"] = "ERROR"
+        result["error_message"] = f"{type(e).__name__}: {e}"
+    finally:
+        result["MUSes"] = muses
+        result["runtimes"] = runtimes
+        # Explicit cleanup inside subprocess
+        del generator
+        del model
+        del muses
+        del runtimes
+        gc.collect()
+        
+        queue.put(result)
+
+   
+def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
+    filenames = pd.read_csv(
+        "cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv",
+        usecols=["filename"]
+    )["filename"].tolist()
+
+    fieldnames = [
+        "instance", "algorithm", "solver", "map_solver", "hs_solver",
+        "status", "runtimes", "error_message", "MUSes"
+    ]
+    algorithms = [
+        "marco",
+        "marco_diverse_noMin",
+        "marco_diverse_min",
+        "ocus_enum1",
+        "ocus_enum_shrink"
+    ]
+    filename = "Knapsack-50-200-16.xml.lzma_1.pkl"
+    # for filename in filenames:
+    path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
+
+    for algorithm in algorithms:
+        print(f"File {filename},  running algorithm: {algorithm}", flush=True)
+
+        queue = mp.Queue()
+        proc = mp.Process(
+            target=run_single_xcsp_instance,
+            args=(
+                queue, path, filename, algorithm,
+                solver, map_solver, hs_solver, time_limit, num_mus
+            )
+        )
+
+        proc.start()
+        proc.join()
+
+        if not queue.empty():
+            result = queue.get()
+        else:
+            # Subprocess died unexpectedly (e.g. SIGKILL / OOM)
+            result = dict.fromkeys(fieldnames)
             result["instance"] = filename
             result["algorithm"] = algorithm
             result["solver"] = solver
             result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
             result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
-            result["error_message"] = None
-            result["status"] = "STARTED"  # default unless proven otherwise
+            result["status"] = "ERROR"
+            result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
+            result["runtimes"] = []
+            result["MUSes"] = []
 
-            model = cp.Model().from_file(path)
-            
-            runtimes = []
-            muses = []
-            
-            try:
-                if algorithm == "marco":
-                    generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
-                elif algorithm == "marco_diverse_noMin":
-                    generator = marco_diverse_noMin_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
-                elif algorithm == "marco_diverse_min":
-                    generator = marco_diverse_Min_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
-                elif algorithm == "ocus_enum1":
-                    generator = ocus_enum_1_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
-                elif algorithm == "ocus_enum_shrink":
-                    generator = ocus_enum_shrink_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
-                else:
-                    raise ValueError(f"Unknown algorithm: {algorithm}")
+        write_results_to_csv(result, fieldnames, output_file)
 
-                for status, subset, elapsed_time in generator:
-                    if status == "MUS":
-                        muses.append(subset)
-                        runtimes.append(elapsed_time)
-                        if len(muses) >= num_mus:
-                            result["status"] = "COMPLETE"
-                            break
-                    elif status == "MCS":
-                        # this should never happen
-                        raise ValueError(f"Received a MCS instead of MUS")
-                    elif status == "TIMEOUT":
-                        result["status"] = "TIMEOUT"
-                        break
-                    else:
-                        raise ValueError(f"Unknown generator status: {status}")
-                    
-            except Exception as e:
-                result["status"] = "ERROR"
-                result["error_message"] = str(e)
-            
-            result["MUSes"] = muses
-            result["runtimes"] = runtimes
-            write_results_to_csv(result, fieldnames, output_file)
-
-   
-    
+        # Parent-side cleanup
+        queue.close()
+        queue.join_thread()
+        del queue
+        del proc
+        gc.collect()
 
 # SAT COMPETITION HELPER FUNCTIONS
 def enum_sat_competition_instances():
