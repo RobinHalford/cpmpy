@@ -334,6 +334,10 @@ def marco_diverse_noMin_assump(soft, hard=[], solver="exact", map_solver="exact"
 
             if return_mus:
                 yield "MUS", core, time.monotonic() - start_time
+        
+        # ensure solution hint is still active
+        if do_solution_hint:
+            map_solver.solution_hint(assump, [seenmap[a] for a in assump])
 
 
 
