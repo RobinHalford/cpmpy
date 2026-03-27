@@ -240,9 +240,6 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
     try:
         model = cp.Model().from_file(path)
 
-        for c in model.constraints:
-            print(c + "\n")
-
         if algorithm == "marco":
             generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_noMin":
@@ -307,48 +304,48 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
         "ocus_enum1",
         "ocus_enum_shrink"
     ]
-    filename = "pigeonsPlus-08-04.xml.lzma.pkl"
-    # for filename in filenames:
-    path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
-    for algorithm in algorithms:
-        print(f"File {filename},  running algorithm: {algorithm}", flush=True)
+    for filename in filenames:
+        path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
-        queue = mp.Queue()
-        proc = mp.Process(
-            target=run_single_xcsp_instance,
-            args=(
-                queue, path, filename, algorithm,
-                solver, map_solver, hs_solver, time_limit, num_mus
+        for algorithm in algorithms:
+            print(f"File {filename},  running algorithm: {algorithm}", flush=True)
+
+            queue = mp.Queue()
+            proc = mp.Process(
+                target=run_single_xcsp_instance,
+                args=(
+                    queue, path, filename, algorithm,
+                    solver, map_solver, hs_solver, time_limit, num_mus
+                )
             )
-        )
 
-        proc.start()
-        proc.join()
+            proc.start()
+            proc.join()
 
-        if not queue.empty():
-            result = queue.get()
-        else:
-            # Subprocess died unexpectedly (e.g. SIGKILL / OOM)
-            result = dict.fromkeys(fieldnames)
-            result["instance"] = filename
-            result["algorithm"] = algorithm
-            result["solver"] = solver
-            result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
-            result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
-            result["status"] = "ERROR"
-            result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
-            result["runtimes"] = []
-            result["MUSes"] = []
+            if not queue.empty():
+                result = queue.get()
+            else:
+                # Subprocess died unexpectedly (e.g. SIGKILL / OOM)
+                result = dict.fromkeys(fieldnames)
+                result["instance"] = filename
+                result["algorithm"] = algorithm
+                result["solver"] = solver
+                result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
+                result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
+                result["status"] = "ERROR"
+                result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
+                result["runtimes"] = []
+                result["MUSes"] = []
 
-        write_results_to_csv(result, fieldnames, output_file)
+            write_results_to_csv(result, fieldnames, output_file)
 
-        # Parent-side cleanup
-        queue.close()
-        queue.join_thread()
-        del queue
-        del proc
-        gc.collect()
+            # Parent-side cleanup
+            queue.close()
+            queue.join_thread()
+            del queue
+            del proc
+            gc.collect()
 
 # SAT COMPETITION HELPER FUNCTIONS
 def enum_sat_competition_instances():
