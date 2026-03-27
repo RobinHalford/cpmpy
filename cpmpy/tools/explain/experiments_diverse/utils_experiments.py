@@ -239,8 +239,6 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         
     try:
         model = cp.Model().from_file(path)
-        for c in model.constraints:
-            print(c)
 
         if algorithm == "marco":
             generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
@@ -306,7 +304,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
         "ocus_enum1",
         "ocus_enum_shrink"
     ]
-    filename = "Knapsack-50-200-16.xml.lzma_1.pkl"
+    filename = "pigeonsPlus-08-04.xml.lzma.pkl"
     # for filename in filenames:
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
