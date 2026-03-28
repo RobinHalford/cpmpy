@@ -8,8 +8,8 @@ def test_pkl_marco_bug():
     filename= "SchurrLemma-030-9-mod.xml.lzma.pkl"
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
-    model = cp.Model().from_file(path)
-    # model = pkl.load(path)
+    # model = cp.Model().from_file(path)
+    model = pkl.load(path)
 
     print("Printing constraints: \n\n")
     for c in model.constraints:
