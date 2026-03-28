@@ -78,7 +78,7 @@ def marco(soft, hard=[], solver="ortools", map_solver="ortools", return_mus=True
                     core.add(c)
                 else: # UNSAT, shrink to new solver core (clause set refinement)
                     core = set(s.get_core())
-
+            print(f"core: {core}")
             map_solver += ~cp.all(core) # block in map solver
 
             if return_mus:
