@@ -1,4 +1,4 @@
-
+from cpmpy.tools.explain.utils import make_assump_model
 from cpmpy.tools.explain.marco import marco
 import cpmpy as cp
 import numpy as np
@@ -31,7 +31,7 @@ def create_sudoku_model():
         [e, e, 2,  e, e, 9,  e, 6, e],
 
         [2, e, e,  e, e, e,  4, e, 9],
-        [e, e, e,  e, 7, e,  e, e, e],
+        [e, e, e,  e, 7, e,  e, e, 9],
         [6, e, 9,  e, e, e,  e, e, 1],
 
         [e, 8, e,  4, e, e,  1, e, e],
@@ -75,5 +75,18 @@ def test_pkl_write_read():
     
 
 if __name__ == "__main__":
-    test_pkl_marco_bug()
+
+    smodel = create_sudoku_model()
+
+    soft = smodel.constraints
+
+    model, soft, assump = make_assump_model(soft, [])
+    s = cp.SolverLookup.get("exact", model)
+
+    r = s.solve(assumptions=[])
+    print("UNSAT without assumptions?", r is False)
+    if r is False:
+        print("Hard constraints already UNSAT")
+
+    # test_pkl_marco_bug()
     # test_pkl_write_read()
