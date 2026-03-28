@@ -60,7 +60,7 @@ def create_sudoku_model():
 
 
 def test_pkl_write_read():
-    model = create_sudoku_model
+    model = create_sudoku_model()
     print("model constraints before writing pkl: \n\n")
     for c in model.constraints:
         print(c + "\n")
@@ -75,4 +75,4 @@ def test_pkl_write_read():
     
 
 if __name__ == "__main__":
-    test_pkl_write_read
+    test_pkl_write_read()
