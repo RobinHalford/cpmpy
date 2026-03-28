@@ -6,7 +6,7 @@ import pickle as pkl
 
 def test_pkl_marco_bug():
 
-    filename= "kbtree-9-7-3-5-90-36.xml.lzma.pkl"
+    filename= "MagicHexagon-05-0024.xml.lzma.pkl"
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
     model = cp.Model().from_file(path)
@@ -63,7 +63,7 @@ def test_pkl_write_read():
     model = create_sudoku_model()
     print("model constraints before writing pkl: \n\n")
     for c in model.constraints:
-        print(c + "\n")
+        print(c)
     print("Writing to pkl file.")
     with open("cpmpy/tools/explain/sudoku.pkl", "wb") as f:
         pkl.dump(model, f)
@@ -71,7 +71,7 @@ def test_pkl_write_read():
     with open("cpmpy/tools/explain/sudoku.pkl", "rb") as f:
         loaded_model = pkl.load(f)
     for c in loaded_model.constraints:
-        print(c + "\n")
+        print(c)
     
 
 if __name__ == "__main__":
