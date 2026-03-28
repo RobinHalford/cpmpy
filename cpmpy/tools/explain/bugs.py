@@ -78,15 +78,11 @@ if __name__ == "__main__":
 
     smodel = create_sudoku_model()
 
-    soft = smodel.constraints
+    generator = marco(smodel.constraints, solver="exact", map_solver="exact", return_mcs=False)
 
-    model, soft, assump = make_assump_model(soft, [])
-    s = cp.SolverLookup.get("exact", model)
-
-    r = s.solve(assumptions=[])
-    print("UNSAT without assumptions?", r is False)
-    if r is False:
-        print("Hard constraints already UNSAT")
+    for kind, subset in generator:
+        print("Found a MUS")
+    print("enumeration complete")
 
     # test_pkl_marco_bug()
     # test_pkl_write_read()
