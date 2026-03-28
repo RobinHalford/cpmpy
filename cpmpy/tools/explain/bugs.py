@@ -20,3 +20,5 @@ def test_pkl_marco_bug():
     print("Result: " + str(result))
 
 
+if __name__ == "__main__":
+    test_pkl_marco_bug()
