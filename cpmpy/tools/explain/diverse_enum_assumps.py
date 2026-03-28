@@ -21,11 +21,17 @@ def timed_solve(solver, deadline, **kwargs):
     rem = remaining_time(deadline)
     if rem is not None and rem <= 0:
         return None
-    t0 = time.monotonic()
-    try:
-        return solver.solve(time_limit=rem, **kwargs)
-    finally:
-        _ = time.monotonic() - t0
+    solver.solve(time_limit=rem, **kwargs)
+    status = solver.status()
+    if status.exitstatus == cp.ExitStatus.OPTIMAL or status.exitstatus == cp.ExitStatus.FEASIBLE:
+        return True
+    elif status.exitstatus == cp.ExitStatus.UNSATISFIABLE:
+        return False
+    elif status.exitstatus == cp.ExitStatus.UNKNOWN:
+        return None 
+    else:
+        return None
+
 
 # just MARCO but returns MUSes as assump variables instead of constraints
 def marco_assumps(soft, hard=[], solver="ortools", map_solver="ortools", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
