@@ -9,7 +9,8 @@ def test_pkl_marco_bug():
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
     # model = cp.Model().from_file(path)
-    model = pkl.load(path)
+    with open(path, 'rb') as f:
+        model = pkl.load(f)
 
     print("Printing constraints: \n\n")
     for c in model.constraints:
