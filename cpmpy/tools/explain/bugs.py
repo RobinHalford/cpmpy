@@ -5,7 +5,7 @@ import pickle as pkl
 
 def test_pkl_marco_bug():
 
-    filename= "SchurrLemma-030-9-mod.xml.lzma.pkl"
+    filename= "MagicHexagon-05-0024.xml.lzma.pkl"
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
     # model = cp.Model().from_file(path)
@@ -17,14 +17,15 @@ def test_pkl_marco_bug():
         print(c + "\n\n")
     
     print("Solving model: \n\n")
-    # result = model.solve("exact")
-    # print("Result: " + str(result))
+    result = model.solve("exact")
+    print("Result: " + str(result))
 
+    """
     generator = marco(model.constraints, solver="exact", map_solver="exact", return_mcs=False)
     for kind, subset in generator:
         print("Found a MUS \n")
         break
-
+    """
 
 
 if __name__ == "__main__":
