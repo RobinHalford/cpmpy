@@ -24,8 +24,6 @@ def timed_solve(solver, deadline, **kwargs):
         return None
     solver.solve(time_limit=rem, **kwargs)
     status = solver.status()
-    print(status)
-    print(status.exitstatus == ExitStatus.FEASIBLE)
     if status.exitstatus == ExitStatus.OPTIMAL or status.exitstatus == ExitStatus.FEASIBLE:
         return True
     elif status.exitstatus == ExitStatus.UNSATISFIABLE:
@@ -33,7 +31,7 @@ def timed_solve(solver, deadline, **kwargs):
     elif status.exitstatus == ExitStatus.UNKNOWN:
         return None 
     else:
-        print("fallback case")
+        print("!!!fallback case!!!")
         return None
 
 
