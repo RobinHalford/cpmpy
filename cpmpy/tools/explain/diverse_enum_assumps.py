@@ -23,7 +23,7 @@ def timed_solve(solver, deadline, **kwargs):
         return None
     solver.solve(time_limit=rem, **kwargs)
     status = solver.status()
-    print("status")
+    print(status)
     if status.exitstatus == cp.ExitStatus.OPTIMAL or status.exitstatus == cp.ExitStatus.FEASIBLE:
         return True
     elif status.exitstatus == cp.ExitStatus.UNSATISFIABLE:
