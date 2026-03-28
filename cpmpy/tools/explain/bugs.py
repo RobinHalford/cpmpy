@@ -15,7 +15,7 @@ def test_pkl_marco_bug():
 
     print("Printing constraints: \n\n")
     for c in model.constraints:
-        print(c + "\n")
+        print(c)
     
     print("Solving model: \n\n")
     result = model.solve("exact")
@@ -75,4 +75,5 @@ def test_pkl_write_read():
     
 
 if __name__ == "__main__":
-    test_pkl_write_read()
+    test_pkl_marco_bug()
+    # test_pkl_write_read()
