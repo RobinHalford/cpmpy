@@ -6,7 +6,7 @@ import pickle as pkl
 
 def test_pkl_marco_bug():
 
-    filename= "MagicHexagon-05-0024.xml.lzma.pkl"
+    filename= "SchurrLemma-030-9-mod.xml.lzma.pkl"
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
     model = cp.Model().from_file(path)
