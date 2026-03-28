@@ -28,7 +28,7 @@ def timed_solve(solver, deadline, **kwargs):
     print(status.exitstatus == ExitStatus.FEASIBLE)
     if status.exitstatus == ExitStatus.OPTIMAL or status.exitstatus == ExitStatus.FEASIBLE:
         return True
-    elif status.existatus == ExitStatus.UNSATISFIABLE:
+    elif status.exitstatus == ExitStatus.UNSATISFIABLE:
         return False
     elif status.exitstatus == ExitStatus.UNKNOWN:
         return None 
