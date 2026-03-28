@@ -4,6 +4,7 @@ import numpy as np
 from .utils import make_assump_model
 from cpmpy.transformations.get_variables import get_variables
 import time
+from cpmpy.solvers.solver_interface import ExitStatus
 
 
 def remaining_time(deadline):
@@ -23,12 +24,11 @@ def timed_solve(solver, deadline, **kwargs):
         return None
     solver.solve(time_limit=rem, **kwargs)
     status = solver.status()
-    print(status)
-    if status.exitstatus == cp.ExitStatus.OPTIMAL or status.exitstatus == cp.ExitStatus.FEASIBLE:
+    if status == ExitStatus.OPTIMAL or status == ExitStatus.FEASIBLE:
         return True
-    elif status.exitstatus == cp.ExitStatus.UNSATISFIABLE:
+    elif status == ExitStatus.UNSATISFIABLE:
         return False
-    elif status.exitstatus == cp.ExitStatus.UNKNOWN:
+    elif status == ExitStatus.UNKNOWN:
         return None 
     else:
         return None
