@@ -5,7 +5,7 @@ import pickle as pkl
 
 def test_pkl_marco_bug():
 
-    filename= "MagicHexagon-05-0024.xml.lzma.pkl"
+    filename= "BusScheduling-cnt-t1.xml.lzma_0.25.pkl"
     path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
 
     # model = cp.Model().from_file(path)
