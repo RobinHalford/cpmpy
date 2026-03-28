@@ -1,6 +1,7 @@
 
 from cpmpy.tools.explain.marco import marco
 import cpmpy as cp
+import numpy as np
 import pickle as pkl
 
 def test_pkl_marco_bug():
@@ -21,5 +22,57 @@ def test_pkl_marco_bug():
     print("Result: " + str(result))
 
 
+
+def create_sudoku_model():
+    e = 0 # value for empty cells
+    given = np.array([
+        [e, e, e,  2, e, 5,  e, e, e],
+        [e, 9, e,  e, e, e,  7, 3, e],
+        [e, e, 2,  e, e, 9,  e, 6, e],
+
+        [2, e, e,  e, e, e,  4, e, 9],
+        [e, e, e,  e, 7, e,  e, e, e],
+        [6, e, 9,  e, e, e,  e, e, 1],
+
+        [e, 8, e,  4, e, e,  1, e, e],
+        [e, 6, 3,  e, e, e,  e, 8, e],
+        [e, e, e,  6, e, 8,  e, e, e]])
+
+
+    # Variables
+    puzzle = cp.intvar(1,9, shape=given.shape, name="puzzle")
+
+
+    model = cp.Model(
+        # Constraints on values (cells that are not empty)
+        puzzle[given!=e] == given[given!=e], # numpy's indexing, vectorized equality
+        # Constraints on rows and columns
+        [cp.AllDifferent(row) for row in puzzle],
+        [cp.AllDifferent(col) for col in puzzle.T], # numpy's Transpose
+    )
+
+    # Constraints on blocks
+    for i in range(0,9, 3):
+        for j in range(0,9, 3):
+            model += cp.AllDifferent(puzzle[i:i+3, j:j+3]) # python's indexing
+
+    return model
+
+
+def test_pkl_write_read():
+    model = create_sudoku_model
+    print("model constraints before writing pkl: \n\n")
+    for c in model.constraints:
+        print(c + "\n")
+    print("Writing to pkl file.")
+    with open("cpmpy/tools/explain/sudoku.pkl", "wb") as f:
+        pkl.dump(model, f)
+    print("Loading model constraints: \n\n")
+    with open("cpmpy/tools/explain/sudoku.pkl", "rb") as f:
+        loaded_model = pkl.load(f)
+    for c in loaded_model.constraints:
+        print(c + "\n")
+    
+
 if __name__ == "__main__":
-    test_pkl_marco_bug()
+    test_pkl_write_read
