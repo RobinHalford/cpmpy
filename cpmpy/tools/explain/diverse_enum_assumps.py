@@ -345,7 +345,7 @@ def marco_diverse_noMin_assump(soft, hard=[], solver="exact", map_solver="exact"
         
         # ensure solution hint is still active
         if do_solution_hint:
-            map_solver.solution_hint(assump, [seenmap[a] for a in assump])
+            map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
 
 
 
