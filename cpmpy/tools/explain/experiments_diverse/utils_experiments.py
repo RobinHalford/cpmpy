@@ -9,6 +9,7 @@ import pathlib
 from urllib.request import urlretrieve
 from urllib.error import HTTPError, URLError
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from filelock import FileLock
 import gc
 import traceback
@@ -289,17 +290,58 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         
         queue.put(result)
 
-   
-def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
+
+_XCSP_FIELDNAMES = [
+    "instance", "algorithm", "solver", "map_solver", "hs_solver",
+    "status", "runtimes", "error_message", "MUSes"
+]
+
+
+def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
+    """Spawn a subprocess for one (filename, algorithm) pair and return the result dict."""
+    queue = mp.Queue()
+    proc = mp.Process(
+        target=run_single_xcsp_instance,
+        args=(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus)
+    )
+    proc.start()
+    proc.join(timeout=time_limit + 60)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=10)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+
+    if not queue.empty():
+        result = queue.get()
+    else:
+        result = dict.fromkeys(_XCSP_FIELDNAMES)
+        result["instance"] = filename
+        result["algorithm"] = algorithm
+        result["solver"] = solver
+        result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
+        result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
+        result["status"] = "ERROR"
+        result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
+        result["runtimes"] = []
+        result["MUSes"] = []
+
+    queue.close()
+    queue.join_thread()
+    del queue
+    del proc
+    gc.collect()
+    return result
+
+
+def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file, max_workers=4):
     filenames = pd.read_csv(
         DATA_DIR / "constraints_stats.csv",
         usecols=["filename"]
     )["filename"].tolist()
 
-    fieldnames = [
-        "instance", "algorithm", "solver", "map_solver", "hs_solver",
-        "status", "runtimes", "error_message", "MUSes"
-    ]
     algorithms = [
         "marco",
         "marco_diverse_noMin",
@@ -308,54 +350,26 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
         "ocus_enum_shrink"
     ]
 
-    for filename in filenames:
+    tasks = [
+        (filename, algorithm)
+        for filename in filenames
+        for algorithm in algorithms
+    ]
+
+    def run_task(filename, algorithm):
         path = str(DATA_DIR / "XCSP_MUS" / filename)
+        print(f"File {filename}, running algorithm: {algorithm}", flush=True)
+        result = _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus)
+        write_results_to_csv(result, _XCSP_FIELDNAMES, output_file)
 
-        for algorithm in algorithms:
-            print(f"File {filename},  running algorithm: {algorithm}", flush=True)
-
-            queue = mp.Queue()
-            proc = mp.Process(
-                target=run_single_xcsp_instance,
-                args=(
-                    queue, path, filename, algorithm,
-                    solver, map_solver, hs_solver, time_limit, num_mus
-                )
-            )
-
-            proc.start()
-            proc.join(timeout=time_limit + 60)
-
-            if proc.is_alive():
-                proc.terminate()
-                proc.join(timeout=10)
-                if proc.is_alive():
-                    proc.kill()
-                    proc.join()
-
-            if not queue.empty():
-                result = queue.get()
-            else:
-                # Subprocess died unexpectedly (e.g. SIGKILL / OOM / timeout)
-                result = dict.fromkeys(fieldnames)
-                result["instance"] = filename
-                result["algorithm"] = algorithm
-                result["solver"] = solver
-                result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
-                result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
-                result["status"] = "ERROR"
-                result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
-                result["runtimes"] = []
-                result["MUSes"] = []
-
-            write_results_to_csv(result, fieldnames, output_file)
-
-            # Parent-side cleanup
-            queue.close()
-            queue.join_thread()
-            del queue
-            del proc
-            gc.collect()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(run_task, fn, alg): (fn, alg) for fn, alg in tasks}
+        for future in as_completed(futures):
+            fn, alg = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Task ({fn}, {alg}) raised unexpected exception: {e}", flush=True)
 
 
 # SAT COMPETITION HELPER FUNCTIONS
