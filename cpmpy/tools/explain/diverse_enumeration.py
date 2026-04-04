@@ -2,72 +2,99 @@ import cpmpy as cp
 import numpy as np
 from .utils import make_assump_model, diversity, diversity_matrix
 from itertools import combinations
-from cpmpy.transformations.get_variables import get_variables
-from cpmpy.tools.explain.marco import marco
+from cpmpy.tools.explain.marco import timed_marco
+import time
+from cpmpy.solvers.solver_interface import ExitStatus
 
 
+def remaining_time(deadline):
+    """Seconds left in the global budget, or None if unlimited."""
+    if deadline is None:
+        return None
+    return deadline - time.monotonic()
 
-# enumerate a fixed amount i MUSes, compute the diversity matrix, select the subset with the highest diversity and return it.
-def marco_select_top_k(constraints, k, i, solver="exact", map_solver="exact"): 
-    muses = []
 
-    for j, (_, mus) in enumerate(marco(constraints, solver=solver, map_solver=map_solver, return_mcs=False)):
-        muses.append(mus)
-        if j == i:
-            break
-    
-    div_matrix = diversity_matrix(muses)
-    top_indx, _ = select_top_k(div_matrix, k)
-    top_muses = [muses[i] for i in top_indx]
-
-    return top_muses
+def timed_solve(solver, deadline, **kwargs):
+    """
+        Solve with remaining global time.
+        Returns solver result, or None if the global time budget is exhausted.
+    """
+    rem = remaining_time(deadline)
+    if rem is not None and rem <= 0:
+        return None
+    solver.solve(time_limit=rem, **kwargs)
+    status = solver.status()
+    if status.exitstatus == ExitStatus.OPTIMAL or status.exitstatus == ExitStatus.FEASIBLE:
+        return True
+    elif status.exitstatus == ExitStatus.UNSATISFIABLE:
+        return False
+    elif status.exitstatus == ExitStatus.UNKNOWN:
+        return None 
+    else:
+        # This should not happen as long as there are no other ExitStatus implemented.
+        return None
 
 
 # enumerate MUSes with marco, at every iteration grow the diversity matrix and
-# return the top k diverse MUSes when diversity of 1 is reached or after max iterations i
-def marco_until_diverse(constraints, k, i, solver="exact", map_solver="exact"):
-    
-    # initiate list and matrix
+# return the top k diverse MUSes when diversity of 1 is reached or time runs out
+def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="exact", return_mcs=False):
+    """
+    Enumerate MUSes with marco until either an optimally diverse set of k MUSes
+    is found (pairwise avg diversity >= 1), or the time limit is exhausted.
+    Returns the most diverse subset of k MUSes found (or all MUSes if fewer than k found).
+
+    :param constraints: soft constraints
+    :param k: desired number of diverse MUSes
+    :param time_limit: total time budget in seconds (2s buffer reserved for post-processing)
+    :param solver: assumption-capable solver (e.g. "exact", "ortools")
+    :param map_solver: map solver (e.g. "exact", "gurobi")
+    """
+    start_time = time.monotonic()
+    deadline = start_time + time_limit - 2  # 2-second buffer for post-processing
+
     muses = []
-    div_matrix = np.empty((1,1), dtype=float)
-    div_matrix[0, 0] = 0
-    
-    # print("Starting to enumerate MUSes ...")
+    div_matrix = np.zeros((0, 0), dtype=float)
     top_indx = None
     avg = 0
 
-    for j, (_, mus) in enumerate(marco_assumps(constraints, solver=solver, map_solver=map_solver, return_mcs=False)):
+    for label, mus, _ in timed_marco(constraints, solver=solver, map_solver=map_solver,
+                                              time_limit=remaining_time(deadline), return_mcs=return_mcs):
+        if label == "TIMEOUT":
+            break
+        if label != "MUS":
+            continue
+
+        j = len(muses)  # 0-based index of this MUS before appending
         muses.append(mus)
 
-        if j > 0:
-            div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)) ,mode="constant")
+        # Expand diversity matrix and fill in pairwise diversities with new MUS
+        if j == 0:
+            div_matrix = np.zeros((1, 1), dtype=float)
+        else:
+            div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)), mode="constant")
+            for l in range(j):
+                div_matrix[l, j] = diversity(muses[l], mus)
 
-        # print(f"Found MUS number {j}")
-        
-        for l in range(len(muses)-1):
-            # print(f"Diversity between MUS {j} and MUS {l}: {diversity(muses[l], mus)}")
-            div_matrix[l,j] = diversity(muses[l], mus)
-        
-        # print(f"The diversity matrix is now: \n {div_matrix}.")
-
-        if j == k:
-            top_indx, avg = select_top_k(div_matrix, k,incremental_last=False)
-            # print(f"Current max average: {avg}")
+        # Once we have at least k MUSes, track the most diverse k-subset
+        if j == k - 1:
+            # First time we have exactly k MUSes: only one combination, full scan
+            top_indx, avg = select_top_k(div_matrix, k, incremental_last=False)
+            if avg >= 1:
+                break
+        elif j >= k:
+            # Incrementally check only combinations that include the newest MUS
+            top_indx, avg = select_top_k(div_matrix, k, incremental_last=True,
+                                          max_comb=top_indx, max_avg=avg)
             if avg >= 1:
                 break
 
-        if j > k:
-            top_indx, avg = select_top_k(div_matrix, k,incremental_last=True, max_comb=top_indx, max_avg=avg)
-            # print(f"Current max average: {avg}")
-            if avg >= 1:
-                break
+    if top_indx is None:
+        # Fewer than k MUSes found — return all of them
+        top_muses = muses
+    else:
+        top_muses = [muses[i] for i in top_indx]
 
-        if j == i:
-            break
-
-    top_muses = [muses[i] for i in top_indx]
-    
-    return top_muses
+    return "MUS", top_muses, time.monotonic() - start_time
 
 
 def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
@@ -83,6 +110,8 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
                                      to return MUSes. Especially useful when `return_mus=True`.
         :param: time_limit: time limit for a single solve call in seconds.
     """
+    start_time = time.monotonic()
+    deadline = None if time_limit is None else start_time + time_limit
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
 
     model, soft, assump = make_assump_model(soft, hard)
@@ -101,27 +130,42 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
     # keep a map of which constraints are seen in previously generated MUSes
     seenmap = dict(zip(assump, [0]*len(assump)))
     
-    while map_solver.solve(time_limit=time_limit):
+    while True:
+        
+        map_result = timed_solve(map_solver, deadline)
+        if map_result is None:
+            yield "TIMEOUT", None, time.monotonic() - start_time
+            return
+        if map_result is False:
+            return
 
         seed = [a for a in assump if a.value()]
 
-        if s.solve(assumptions=seed, time_limit=time_limit) is True:
+        sat_result = timed_solve(s, deadline, assumptions=seed)
+        if sat_result is None:
+            yield "TIMEOUT", None, time.monotonic() - start_time
+            return
+
+        if sat_result is True:
             # SAT, grow, to full MSS
             # Grow with already seen *similar* !! constraints first 
             # (a blocked similar MCS will stimulate more diverse MUS)
 
-            
             # Assumptions encode indicator constraints a -> c, find all true assumptions
             #    and those that could just as well be made true given the current solution
             mss = [a for a,c in zip(assump, soft) if a.value() or c.value()]
             for to_add in sorted(set(assump) - set(mss), key=seenmap.get):
-                if s.solve(assumptions=mss + [to_add], time_limit=time_limit) is True:
+                grow_result = timed_solve(s, deadline, assumptions=mss + [to_add])
+                if grow_result is None:
+                    yield "TIMEOUT", None, time.monotonic() - start_time
+                    return
+                if grow_result is True:
                     mss.append(to_add)
             mcs = [a for a in assump if a not in frozenset(mss)] # take complement
             map_solver += cp.any(mcs) # block in map solver
 
             if return_mcs:
-                yield "MCS", [dmap[a] for a in mcs]
+                yield "MCS", [dmap[a] for a in mcs], time.monotonic() - start_time
 
 
         else: 
@@ -134,7 +178,11 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
                 if c not in core: # already removed
                     continue
                 core.remove(c)
-                if s.solve(assumptions=list(core), time_limit=time_limit) is True:
+                shrink_result = timed_solve(s, deadline, assumptions=list(core))
+                if shrink_result is None:
+                    yield "TIMEOUT", None, time.monotonic() - start_time
+                    return
+                if shrink_result is True:
                     core.add(c)
                 else: # UNSAT, shrink to new solver core (clause set refinement)
                     core = set(s.get_core())
@@ -146,7 +194,7 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
                 seenmap[a] += 1
 
             if return_mus:
-                yield "MUS", [dmap[a] for a in core]
+                yield "MUS", [dmap[a] for a in core], time.monotonic() - start_time
 
         map_solver.minimize(cp.sum([seenmap[a] for a in assump]*assump)) 
 
@@ -165,6 +213,8 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
                                      to return MUSes. Especially useful when `return_mus=True`.
         :param: time_limit: time limit for a single solve call in seconds.
     """
+    start_time = time.monotonic()
+    deadline = None if time_limit is None else start_time + time_limit
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
 
     model, soft, assump = make_assump_model(soft, hard)
@@ -176,18 +226,30 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
 
     map_solver += cp.any(assump)
 
-    if do_solution_hint and hasattr(map_solver, 'solution_hint'):
+    if do_solution_hint:
         map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
-
+  
     # deletion order based on already seen constraints
     # keep a map of which constraints are seen in previously generated MUSes
     seenmap = dict(zip(assump, [0]*len(assump)))
     
-    while map_solver.solve(time_limit=time_limit):
-
+    while True:
+        
+        map_result = timed_solve(map_solver, deadline)
+        if map_result is None:
+            yield "TIMEOUT", None, time.monotonic() - start_time
+            return
+        if map_result is False:
+            return
+        
         seed = [a for a in assump if a.value()]
 
-        if s.solve(assumptions=seed, time_limit=time_limit) is True:
+        sat_result = timed_solve(s, deadline, assumptions=seed)
+        if sat_result is None:
+            yield "TIMEOUT", None, time.monotonic() - start_time
+            return
+
+        if sat_result is True:
             # SAT, grow, to full MSS
             # Grow with already seen *similar* !! constraints first 
             # (a blocked similar MCS will stimulate more diverse MUS)
@@ -197,13 +259,17 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
             #    and those that could just as well be made true given the current solution
             mss = [a for a,c in zip(assump, soft) if a.value() or c.value()]
             for to_add in sorted(set(assump) - set(mss), key=seenmap.get):
-                if s.solve(assumptions=mss + [to_add], time_limit=time_limit) is True:
+                grow_result = timed_solve(s, deadline, assumptions=mss + [to_add])
+                if grow_result is None:
+                    yield "TIMEOUT", None, time.monotonic() - start_time
+                    return
+                if grow_result is True:
                     mss.append(to_add)
             mcs = [a for a in assump if a not in frozenset(mss)] # take complement
             map_solver += cp.any(mcs) # block in map solver
 
             if return_mcs:
-                yield "MCS", core # , [dmap[a] for a in mcs]
+                yield "MCS", [dmap[a] for a in mcs], time.monotonic() - start_time
 
 
         else: 
@@ -216,7 +282,11 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
                 if c not in core: # already removed
                     continue
                 core.remove(c)
-                if s.solve(assumptions=list(core), time_limit=time_limit) is True:
+                shrink_result = timed_solve(s, deadline, assumptions=list(core))
+                if shrink_result is None:
+                    yield "TIMEOUT", None, time.monotonic() - start_time
+                    return
+                if shrink_result is True:
                     core.add(c)
                 else: # UNSAT, shrink to new solver core (clause set refinement)
                     core = set(s.get_core())
@@ -228,13 +298,19 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
                 seenmap[a] += 1
 
             if return_mus:
-                yield "MUS", [dmap[a] for a in core]
+                yield "MUS", [dmap[a] for a in core], time.monotonic() - start_time
+        
+        # update solution hint is still active
+        if do_solution_hint:
+            map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
 
 
 # enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
 # and block the previously found MUSes in the hitting set solver
 # ORTOOLS appears to be faster here than the exact solver for hitting set computation
 def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=None):
+    start_time = time.monotonic()
+    deadline = None if time_limit is None else start_time + time_limit
     
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), f"optimal_mus requires a solver that supports assumption variables, use optimal_mus_naive with {solver} instead"
     model, soft, assump = make_assump_model(soft, hard)
@@ -242,7 +318,8 @@ def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=
     seenmap = dict(zip(assump, [1]*len(assump)))
     
     s = cp.SolverLookup.get(solver, model)
-    assert s.solve(assumptions=assump, time_limit=time_limit) is False
+
+    # assert s.solve(assumptions=assump, time_limit=time_limit) is False
 
     # initialize hitting set solver
     hs_solver = cp.SolverLookup.get(hs_solver)
@@ -253,9 +330,23 @@ def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=
         hs_solver.minimize(cp.sum(assump * np.array(seen)))
 
         # hitting set loop
-        while hs_solver.solve(time_limit=time_limit) is True:
+        unsat_hitting_set = None
+        while True:
+            hs_result = timed_solve(hs_solver, deadline)
+            if hs_result is None:
+                yield "TIMEOUT", None, time.monotonic() - start_time
+                return
+            if hs_result is False:
+                break
+            
             hitting_set = [a for a in assump if a.value()]
-            if s.solve(assumptions=hitting_set, time_limit=time_limit) is False:
+
+            sat_result = timed_solve(s, deadline, assumptions=hitting_set)
+            if sat_result is None:
+                yield "TIMEOUT", None, time.monotonic() - start_time
+                return
+            if sat_result is False:
+                unsat_hitting_set = hitting_set
                 break
 
             # else, the hitting set is SAT, now try to extend it without extra solve calls.
@@ -268,16 +359,26 @@ def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=
 
             # greedily search for other corr subsets disjoint to this one
             sat_subset = list(new_corr_subset)
-            while s.solve(assumptions=sat_subset, time_limit=time_limit) is True:
+            while True:
+                sat_result = timed_solve(s, deadline, assumptions=sat_subset)
+                if sat_result is None:
+                    yield "TIMEOUT", None, time.monotonic() - start_time
+                    return
+                if sat_result is False:
+                    break
                 new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
                 sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
                 hs_solver += cp.sum(new_corr_subset) >= 1 # add new corr subset to hitting set solver
+                
+        if unsat_hitting_set is None:
+            return
+        hitting_set = set(unsat_hitting_set)
         inc = len(hitting_set)
         for a in hitting_set:
             seenmap[a] += inc
         # block found MUS in hitting set solver
         hs_solver += ~cp.all(hitting_set)
-        yield [dmap[a] for a in hitting_set]
+        yield "MUS", [dmap[a] for a in hitting_set], time.monotonic() - start_time
     
 
 
@@ -286,6 +387,8 @@ def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=
 # ORTOOLS appears to be faster here than the exact solver for hitting set computation
 # VERSION WHERE WEIGHTS ARE ZERO FOR UNSEEN CONSTRAINTS AND WITH SHRINKING
 def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=None):
+    start_time = time.monotonic()
+    deadline = None if time_limit is None else start_time + time_limit
     
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), f"optimal_mus requires a solver that supports assumption variables, use optimal_mus_naive with {solver} instead"
     model, soft, assump = make_assump_model(soft, hard)
@@ -294,7 +397,7 @@ def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_l
     seenmap = dict(zip(assump, [1]*len(assump)))
     
     s = cp.SolverLookup.get(solver, model)
-    assert s.solve(assumptions=assump, time_limit=time_limit) is False
+    # assert s.solve(assumptions=assump, time_limit=time_limit) is False
 
     # initialize hitting set solver
     hs_solver = cp.SolverLookup.get(hs_solver)
@@ -305,10 +408,24 @@ def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_l
         hs_solver.minimize(cp.sum(assump * np.array(seen)))
 
         # hitting set loop
-        while hs_solver.solve(time_limit=time_limit) is True:
-            hitting_set = [a for a in assump if a.value()]
-            if s.solve(assumptions=hitting_set, time_limit=time_limit) is False:
+        unsat_hitting_set = None
+        while True:
+            hs_result = timed_solve(hs_solver, deadline)
+            if hs_result is None:
+                yield "TIMEOUT", None, time.monotonic() - start_time
+                return
+            if hs_result is False:
                 break
+            
+            hitting_set = [a for a in assump if a.value()]
+
+            sat_result = timed_solve(s, deadline, assumptions=hitting_set)
+            if sat_result is None:
+                yield "TIMEOUT", None, time.monotonic() - start_time
+                return
+            if sat_result is False:
+                unsat_hitting_set = hitting_set
+                break 
 
             # else, the hitting set is SAT, now try to extend it without extra solve calls.
             # Check which other assumptions/constraints are satisfied (using c.value())
@@ -320,18 +437,31 @@ def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_l
 
             # greedily search for other corr subsets disjoint to this one
             sat_subset = list(new_corr_subset)
-            while s.solve(assumptions=sat_subset, time_limit=time_limit) is True:
+            while True:
+                sat_result = timed_solve(s, deadline, assumptions=sat_subset)
+                if sat_result is None:
+                    yield "TIMEOUT", None, time.monotonic() - start_time
+                    return
+                if sat_result is False:
+                    break
+
                 new_corr_subset = [a for a,c in zip(assump, soft) if a.value() is False and c.value() is False]
                 sat_subset += new_corr_subset # extend sat subset with new corr subset, guaranteed to be disjoint
                 hs_solver += cp.sum(new_corr_subset) >= 1 # add new corr subset to hitting set solver
         
+        if unsat_hitting_set is None:
+            return
         # shrink to a MUS
-        hitting_set = set(hitting_set)
+        hitting_set = set(unsat_hitting_set)
         for c in sorted(hitting_set, key=seenmap.get, reverse=True):
             if c not in hitting_set: # already removed
                 continue
             hitting_set.remove(c)
-            if s.solve(assumptions=list(hitting_set), time_limit=time_limit):
+            sat_result = timed_solve(s, deadline, assumptions=list(hitting_set))
+            if sat_result is None:
+                yield "TIMEOUT", None, time.monotonic() - start_time
+                return
+            if sat_result:
                 hitting_set.add(c)
             else: # UNSAT, shrink to new solver core (clause set refinement)
                 hitting_set = set(s.get_core())
@@ -345,8 +475,7 @@ def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_l
             seenmap[a] += 1
         # block found MUS in hitting set solver
         hs_solver += ~cp.all(hitting_set)
-        yield [dmap[a] for a in hitting_set]
-
+        yield "MUS", [dmap[a] for a in hitting_set], time.monotonic() - start_time
 
 
 # helper function

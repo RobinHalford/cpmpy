@@ -1,10 +1,11 @@
 
 import cpmpy as cp
 import numpy as np
-from .utils import make_assump_model
+from .utils import make_assump_model, diversity_matrix, diversity 
 from cpmpy.transformations.get_variables import get_variables
 import time
 from cpmpy.solvers.solver_interface import ExitStatus
+from itertools import combinations
 
 
 def remaining_time(deadline):
@@ -192,7 +193,6 @@ def marco_diverse_Min_assump(soft, hard=[], solver="exact", map_solver="exact", 
             # SAT, grow, to full MSS
             # Grow with already seen *similar* !! constraints first 
             # (a blocked similar MCS will stimulate more diverse MUS)
-
             
             # Assumptions encode indicator constraints a -> c, find all true assumptions
             #    and those that could just as well be made true given the current solution
@@ -269,7 +269,7 @@ def marco_diverse_noMin_assump(soft, hard=[], solver="exact", map_solver="exact"
 
     map_solver += cp.any(assump)
 
-    if do_solution_hint and hasattr(map_solver, 'solution_hint'):
+    if do_solution_hint:
         map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
 
     # deletion order based on already seen constraints
@@ -343,7 +343,7 @@ def marco_diverse_noMin_assump(soft, hard=[], solver="exact", map_solver="exact"
             if return_mus:
                 yield "MUS", core, time.monotonic() - start_time
         
-        # ensure solution hint is still active
+        # update solution hint is still active
         if do_solution_hint:
             map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
 
@@ -522,3 +522,119 @@ def ocus_enum_shrink_assump(soft, hard=[], solver="ortools", hs_solver="gurobi",
         # block found MUS in hitting set solver
         hs_solver += ~cp.all(hitting_set)
         yield "MUS", hitting_set, time.monotonic() - start_time
+
+
+# helper function
+def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
+    """
+        Returns a tuple with the indeces of the top-k highest average in the matrix.
+
+        :param: matrix: the upper triangular matrix with values
+        :param: k: the size of the top subset to be computed
+        :param: incremental_last: whether only the combinations with the last element
+             in it are computed because this function is used incrementally.
+    """
+
+    n = len(matrix)
+
+    if k <= 0 or n<=1:
+        return max_comb, max_avg
+    
+    total_pairs = k * (k - 1) / 2.0
+
+    if incremental_last:
+
+        last = n - 1
+        for base in combinations(range(n-1),k-1):
+            comb = base + (last,)
+            # print(f"combination: {comb}")
+            curr_sum = 0
+            for indx in combinations(comb, 2):
+                curr_sum += matrix[indx]
+                # print(f"taking avg elem: {matrix[indx]}")
+
+            curr_avg = curr_sum / total_pairs
+            # print(f"The avg div of this combination was: {curr_avg}.")
+
+            if curr_avg > max_avg:
+                max_avg = curr_avg
+                max_comb = comb
+    
+    else:
+        for comb in combinations(range(n), k):
+            curr_sum = 0
+            # print(f"combination: {comb}")
+            for indx in combinations(comb, 2):
+                # print(f"taking avg elem: {matrix[indx]}")
+                curr_sum += matrix[indx]
+        
+            curr_avg = curr_sum / total_pairs
+            # print(f"The avg div of this combination was: {curr_avg}.")
+
+            if curr_avg > max_avg:
+                max_avg = curr_avg
+                max_comb = comb
+
+    return max_comb, max_avg
+
+
+# enumerate MUSes with marco, at every iteration grow the diversity matrix and
+# return the top k diverse MUSes when diversity of 1 is reached or time runs out
+def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="exact", return_mcs=False):
+    """
+    Enumerate MUSes with marco_assumps until either an optimally diverse set of k MUSes
+    is found (pairwise avg diversity >= 1), or the time limit is exhausted.
+    Returns the most diverse subset of k MUSes found (or all MUSes if fewer than k found).
+
+    :param constraints: soft constraints
+    :param k: desired number of diverse MUSes
+    :param time_limit: total time budget in seconds (2s buffer reserved for post-processing)
+    :param solver: assumption-capable solver (e.g. "exact", "ortools")
+    :param map_solver: map solver (e.g. "exact", "gurobi")
+    """
+    start_time = time.monotonic()
+    deadline = start_time + time_limit - 2  # 2-second buffer for post-processing
+
+    muses = []
+    div_matrix = np.zeros((0, 0), dtype=float)
+    top_indx = None
+    avg = 0
+
+    for label, mus, _ in marco_assumps(constraints, solver=solver, map_solver=map_solver,
+                                              time_limit=remaining_time(deadline), return_mcs=return_mcs):
+        if label == "TIMEOUT":
+            break
+        if label != "MUS":
+            continue
+
+        j = len(muses)  # 0-based index of this MUS before appending
+        muses.append(mus)
+
+        # Expand diversity matrix and fill in pairwise diversities with new MUS
+        if j == 0:
+            div_matrix = np.zeros((1, 1), dtype=float)
+        else:
+            div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)), mode="constant")
+            for l in range(j):
+                div_matrix[l, j] = diversity(muses[l], mus)
+
+        # Once we have at least k MUSes, track the most diverse k-subset
+        if j == k - 1:
+            # First time we have exactly k MUSes: only one combination, full scan
+            top_indx, avg = select_top_k(div_matrix, k, incremental_last=False)
+            if avg >= 1:
+                break
+        elif j >= k:
+            # Incrementally check only combinations that include the newest MUS
+            top_indx, avg = select_top_k(div_matrix, k, incremental_last=True,
+                                          max_comb=top_indx, max_avg=avg)
+            if avg >= 1:
+                break
+
+    if top_indx is None:
+        # Fewer than k MUSes found — return all of them
+        top_muses = muses
+    else:
+        top_muses = [muses[i] for i in top_indx]
+
+    return "MUS", top_muses, time.monotonic() - start_time
