@@ -23,6 +23,8 @@ from examples.nurserostering import NurseRosteringDataset, nurserostering_model,
 
 import cpmpy as cp
 
+DATA_DIR = pathlib.Path(__file__).parent / "data"
+
 
 def get_optimal(model, time_limit=60, solver="ortools"):
     model.solve(time_limit=time_limit, solver=solver)
@@ -239,6 +241,7 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         
     try:
         model = cp.Model().from_file(path)
+        constraint_to_idx = {id(c): i for i, c in enumerate(model.constraints)}
 
         if algorithm == "marco":
             generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
@@ -255,7 +258,7 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
 
         for status, subset, elapsed_time in generator:
             if status == "MUS":
-                muses.append(subset)
+                muses.append([constraint_to_idx[id(c)] for c in subset])
                 runtimes.append(elapsed_time)
                 if len(muses) >= num_mus:
                     result["status"] = "COMPLETE"
@@ -289,7 +292,7 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
    
 def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file):
     filenames = pd.read_csv(
-        "cpmpy/tools/explain/experiments_diverse/data/constraints_stats.csv",
+        DATA_DIR / "constraints_stats.csv",
         usecols=["filename"]
     )["filename"].tolist()
 
@@ -306,7 +309,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
     ]
 
     for filename in filenames:
-        path = "cpmpy/tools/explain/experiments_diverse/data/XCSP_MUS/" + filename
+        path = str(DATA_DIR / "XCSP_MUS" / filename)
 
         for algorithm in algorithms:
             print(f"File {filename},  running algorithm: {algorithm}", flush=True)
@@ -321,12 +324,19 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
             )
 
             proc.start()
-            proc.join()
+            proc.join(timeout=time_limit + 60)
+
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=10)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join()
 
             if not queue.empty():
                 result = queue.get()
             else:
-                # Subprocess died unexpectedly (e.g. SIGKILL / OOM)
+                # Subprocess died unexpectedly (e.g. SIGKILL / OOM / timeout)
                 result = dict.fromkeys(fieldnames)
                 result["instance"] = filename
                 result["algorithm"] = algorithm
@@ -350,7 +360,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
 
 # SAT COMPETITION HELPER FUNCTIONS
 def enum_sat_competition_instances():
-    with open("cpmpy/tools/explain/experiments_diverse/data/unsat_instances_2025.uri", "r") as f:
+    with open(DATA_DIR / "unsat_instances_2025.uri", "r") as f:
         count = 0
         for line in f:
             url = line.strip()
@@ -360,7 +370,7 @@ def enum_sat_competition_instances():
                 # load instance from url and yield model
                 try:
                     # download file to temporary location
-                    tmp_path = pathlib.Path("cpmpy/tools/explain/experiments_diverse/data/satcompinstances/tmp_instance_" + str(count) + ".txt")
+                    tmp_path = DATA_DIR / "satcompinstances" / f"tmp_instance_{count}.txt"
                     urlretrieve(url, str(tmp_path))
                     count += 1
                 except (HTTPError, URLError) as e:
