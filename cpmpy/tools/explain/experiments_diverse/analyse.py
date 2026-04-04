@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
-import re
 from pathlib import Path
-from typing import List, Sequence, Set
+from typing import List, Sequence
 import pandas as pd
 import numpy as np
 
 from cpmpy.tools.explain.utils import average_diversity, diversity_matrix
 from cpmpy.tools.explain.visualize_diversity import visualize_heatmap
-
-TOKEN_RE = re.compile(r"[^,\s\[\]\{\}]+")
-
 
 def parse_runtime_list(text: str) -> List[float]:
     """Parse a string like '[0.1, 0.3, 0.9]' into a list of floats."""
@@ -33,44 +30,16 @@ def parse_runtime_list(text: str) -> List[float]:
     return values
 
 
-def parse_mus_list(text: str) -> List[Set[str]]:
+def parse_mus_list(text: str) -> List[List[int]]:
     """
-    Parse a MUS collection string like:
-        "[{BV1, BV2}, {BV3, BV4}]"
-        "[[BV1, BV2], [BV3, BV4]]"
-    into:
-        [{"BV1", "BV2"}, {"BV3", "BV4"}]
+    Parse a MUS collection string like "[[0, 2, 5], [1, 3]]" into a list of
+    index lists.  MUSes are stored as constraint indices (into model.constraints)
+    rather than raw constraint objects.
     """
     text = (text or "").strip()
     if not text or text == "[]":
         return []
-
-    muses: List[Set[str]] = []
-    current: List[str] = []
-    depth = 0
-    in_mus = False
-
-    for ch in text:
-        if ch in "{[":
-            depth += 1
-            # depth 2 means we just entered one MUS inside the outer list
-            if depth == 2:
-                in_mus = True
-                current = []
-        elif ch in "}]":
-            if depth == 2 and in_mus:
-                tokens = TOKEN_RE.findall("".join(current))
-                mus = {tok for tok in tokens if tok}
-                if mus:
-                    muses.append(mus)
-                in_mus = False
-                current = []
-            depth -= 1
-        else:
-            if in_mus:
-                current.append(ch)
-
-    return muses
+    return ast.literal_eval(text)
 
 
 def total_runtime(runtimes: Sequence[float]) -> float:
@@ -182,7 +151,7 @@ def summarize_per_algorithm(compare_csv: Path, output_csv: Path) -> None:
 
     df_all_completed = df[df["instance"].isin(completed_instances[completed_instances].index)]
     # df_completed = df[is_completed]
-    df_all_completed.to_csv("results/completed_instances.csv", index=False)
+    df_all_completed.to_csv(output_csv.parent / "completed_instances.csv", index=False)
 
     agg = (
         df_all_completed.groupby("algorithm")
@@ -195,8 +164,8 @@ def summarize_per_algorithm(compare_csv: Path, output_csv: Path) -> None:
     result.to_csv(output_csv)
 
 
-def plots_1_instance() -> None:
-    df = pd.read_csv("results/1instance.csv")
+def plots_1_instance(input_csv: Path) -> None:
+    df = pd.read_csv(input_csv)
     div_matrices = []
     for _, row in df.iterrows():
         muses = parse_mus_list(str(row["MUSes"]))
@@ -215,7 +184,7 @@ def main() -> None:
     # summarize(args.input_csv, args.output_dir/"diversity.csv")
     # analyze_summary(args.output_dir/"diversity.csv", args.output_dir/"compare.csv")
     # summarize_per_algorithm(args.output_dir/"compare.csv", args.output_dir/"summary_all_completed.csv")
-    plots_1_instance()
+    plots_1_instance(args.input_csv)
 
 if __name__ == "__main__":
     main()
