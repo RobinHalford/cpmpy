@@ -347,6 +347,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
             del proc
             gc.collect()
 
+
 # SAT COMPETITION HELPER FUNCTIONS
 def enum_sat_competition_instances():
     with open("cpmpy/tools/explain/experiments_diverse/data/unsat_instances_2025.uri", "r") as f:
@@ -365,19 +366,3 @@ def enum_sat_competition_instances():
                 except (HTTPError, URLError) as e:
                     raise ValueError(f"No dataset available on {url}. Error: {str(e)}")
     return
-
-
-"""
- def get_filename_from_uri(url, response):
-    # 1) Try Content-Disposition header
-    cd = response.headers.get("Content-Disposition")
-    if cd:
-        match = FILENAME_RE.search(cd)
-        if match:
-            return pathlib.Path(match.group(1)).name
-
-    # 2) Fallback: last part of URL path
-    path = urlparse(url).path
-    name = pathlib.Path(path).name
-    return name if name else "downloaded_file"
-"""
