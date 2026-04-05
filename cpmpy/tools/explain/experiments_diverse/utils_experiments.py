@@ -16,8 +16,9 @@ import traceback
 import multiprocessing as mp
 import pandas as pd
 import time
-from cpmpy.tools.explain.mus import smus 
-from cpmpy.tools.explain.diverse_enum_assumps import marco_assumps, marco_diverse_Min_assump, marco_diverse_noMin_assump, ocus_enum_1_assump, ocus_enum_shrink_assump
+from cpmpy.tools.explain.mus import smus
+from cpmpy.tools.explain.marco import timed_marco
+from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, ocus_enum_1, ocus_enum_shrink
 from cpmpy.tools.explain.utils import average_diversity
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
@@ -104,7 +105,7 @@ def execute_solver_combination_instance(instance, model, time_limit: int, output
                     result["solver"] = solver
                     result["map_solver"] = map_solver
                     result["hs_solver"] = None
-                    generator = enumerate(marco_assumps(cmodel.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=20))
+                    generator = enumerate(timed_marco(cmodel.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=20))
                     try:
                         runtimes = []
                         start_time = time.time()
@@ -177,13 +178,13 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
                 runtimes = []
                 muses = []
                 if algorithm == "marco":
-                    generator = enumerate(marco_assumps(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
+                    generator = enumerate(timed_marco(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
                 elif algorithm == "marco_select_top_k":
                     ... # TODO (not enumaration function)
                 elif algorithm == "marco_diverse_min":
-                    generator = enumerate(marco_diverse_Min_assump(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
+                    generator = enumerate(marco_diverse_Min(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
                 elif algorithm == "marco_diverse_no_min":
-                    generator = enumerate(marco_diverse_noMin_assump(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
+                    generator = enumerate(marco_diverse_noMin(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
                 elif algorithm == "ocus_enum":
                     # generator = enumerate(ocus_enum(model.constraints, solver=solver, hs_solver=hs_solver))
                     ... # TODO 
@@ -245,15 +246,15 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         constraint_to_idx = {id(c): i for i, c in enumerate(model.constraints)}
 
         if algorithm == "marco":
-            generator = marco_assumps(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+            generator = timed_marco(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_noMin":
-            generator = marco_diverse_noMin_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+            generator = marco_diverse_noMin(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_min":
-            generator = marco_diverse_Min_assump(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+            generator = marco_diverse_Min(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "ocus_enum1":
-            generator = ocus_enum_1_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+            generator = ocus_enum_1(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
         elif algorithm == "ocus_enum_shrink":
-            generator = ocus_enum_shrink_assump(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+            generator = ocus_enum_shrink(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
@@ -352,7 +353,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
 
     tasks = [
         (filename, algorithm)
-        for filename in filenames
+        for filename in filenames[:1] #small test
         for algorithm in algorithms
     ]
 
