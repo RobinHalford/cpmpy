@@ -353,7 +353,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
 
     tasks = [
         (filename, algorithm)
-        for filename in filenames[:1] #small test
+        for filename in filenames
         for algorithm in algorithms
     ]
 
