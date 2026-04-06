@@ -1,6 +1,6 @@
 import cpmpy as cp
 import numpy as np
-from .utils import make_assump_model, diversity, diversity_matrix
+from .utils import make_assump_model, diversity
 from itertools import combinations
 from cpmpy.tools.explain.marco import timed_marco
 import time
