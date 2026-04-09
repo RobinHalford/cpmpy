@@ -18,7 +18,7 @@ import pandas as pd
 import time
 from cpmpy.tools.explain.mus import smus
 from cpmpy.tools.explain.marco import timed_marco
-from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, ocus_enum_1, ocus_enum_shrink
+from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, marco_diverse_optimal, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
 from cpmpy.tools.explain.utils import average_diversity
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
@@ -230,8 +230,8 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
     result["instance"] = filename
     result["algorithm"] = algorithm
     result["solver"] = solver
-    result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
-    result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
+    result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
+    result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
     result["error_message"] = None
     result["status"] = "STARTED"  # default unless proven otherwise
 
@@ -247,14 +247,20 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
 
         if algorithm == "marco":
             generator = timed_marco(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        # elif algorithm == "marco_select_top_k":
+            #
         elif algorithm == "marco_diverse_noMin":
             generator = marco_diverse_noMin(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_min":
             generator = marco_diverse_Min(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        elif algorithm == "marco_diverse_opt":
+            generator = marco_diverse_optimal(model.constraints, solver=solver, map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "ocus_enum1":
             generator = ocus_enum_1(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
         elif algorithm == "ocus_enum_shrink":
             generator = ocus_enum_shrink(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
+        elif algorithm == "ocus_enum_opt":
+            generator = ocus_enum_opt_nextMUS(model.constraints,solver=solver,hs_solver=hs_solver, time_limit=time_limit)
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
@@ -322,8 +328,8 @@ def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, tim
         result["instance"] = filename
         result["algorithm"] = algorithm
         result["solver"] = solver
-        result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink"] else None
-        result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink"] else None
+        result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
+        result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
         result["status"] = "ERROR"
         result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
         result["runtimes"] = []
@@ -345,10 +351,13 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
 
     algorithms = [
         "marco",
+        # "marco_select_top_k",
         "marco_diverse_noMin",
         "marco_diverse_min",
+        "marco_diverse_opt",
         "ocus_enum1",
-        "ocus_enum_shrink"
+        "ocus_enum_shrink",
+        "ocus_enum_opt"
     ]
 
     tasks = [
