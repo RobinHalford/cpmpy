@@ -18,7 +18,7 @@ import pandas as pd
 import time
 from cpmpy.tools.explain.mus import smus
 from cpmpy.tools.explain.marco import timed_marco
-from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, marco_diverse_optimal, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
+from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
 from cpmpy.tools.explain.utils import average_diversity
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
@@ -298,10 +298,62 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         queue.put(result)
 
 
+
+def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, time_limit, num_mus):
+    
+    fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
+
+    result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
+    result["instance"] = filename
+    result["algorithm"] = "marco_until_diverse"
+    result["solver"] = solver
+    result["map_solver"] = map_solver
+    result["error_message"] = None
+    result["status"] = "STARTED"  # default unless proven otherwise
+
+    model = None
+    generator = None
+    
+    runtimes = []
+    muses = []
+        
+    try:
+        model = cp.Model().from_file(path)
+        constraint_to_idx = {id(c): i for i, c in enumerate(model.constraints)}
+
+        status, muses, runtimes = marco_until_diverse(model.constraints, num_mus, time_limit=time_limit, solver=solver, map_solver=map_solver)
+        if status == "COMPLETE":
+            result["status"] = "COMPLETE"
+        elif status == "TIMEOUT":
+            result["status"] = "TIMEOUT"
+        else:
+            raise ValueError(f"Unknown generator status: {status}")
+        if result["status"] == "STARTED":
+            # In case generator ends naturally before num_mus
+            result["status"] = "EXHAUSTED"  
+    except Exception as e:
+        result["status"] = "ERROR"
+        result["error_message"] = f"{type(e).__name__}: {e}"
+    finally:
+        muses = [[constraint_to_idx[id(c)] for c in subset] for subset in muses]
+        result["MUSes"] = muses
+        result["runtimes"] = runtimes
+        # Explicit cleanup inside subprocess
+        del generator
+        del model
+        del muses
+        del runtimes
+        gc.collect()
+        
+        queue.put(result)
+
+
 _XCSP_FIELDNAMES = [
     "instance", "algorithm", "solver", "map_solver", "hs_solver",
     "status", "runtimes", "error_message", "MUSes"
 ]
+_XCSP_FIELDNAMES_TOPK = [ "instance", "algorithm", "solver", "map_solver",
+    "status", "runtimes", "error_message", "MUSes"]
 
 
 def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
@@ -330,6 +382,44 @@ def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, tim
         result["solver"] = solver
         result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
         result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
+        result["status"] = "ERROR"
+        result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
+        result["runtimes"] = []
+        result["MUSes"] = []
+
+    queue.close()
+    queue.join_thread()
+    del queue
+    del proc
+    gc.collect()
+    return result
+
+
+def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
+    """Spawn a subprocess for one (filename, algorithm) pair and return the result dict."""
+    queue = mp.Queue()
+    proc = mp.Process(
+        target=run_single_xcsp_instance_top_k,
+        args=(queue, path, filename, solver, map_solver, time_limit, num_mus)
+    )
+    proc.start()
+    proc.join(timeout=time_limit + 60)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=10)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+
+    if not queue.empty():
+        result = queue.get()
+    else:
+        result = dict.fromkeys(_XCSP_FIELDNAMES_TOPK)
+        result["instance"] = filename
+        result["algorithm"] = "marco_until_diverse"
+        result["solver"] = solver
+        result["map_solver"] = map_solver
         result["status"] = "ERROR"
         result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
         result["runtimes"] = []
@@ -380,6 +470,28 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
                 future.result()
             except Exception as e:
                 print(f"Task ({fn}, {alg}) raised unexpected exception: {e}", flush=True)
+
+
+def execute_xcsp_top_k(num_mus, solver, map_solver, time_limit, output_file, max_workers=4):
+    filenames = pd.read_csv(
+        DATA_DIR / "constraints_stats.csv",
+        usecols=["filename"]
+    )["filename"].tolist()
+    tasks = [filename for filename in filenames]
+    def run_task(filename):
+        path = str(DATA_DIR / "XCSP_MUS" / filename)
+        print(f"File {filename}, running marco until diverse", flush=True)
+        result = _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus)
+        write_results_to_csv(result, _XCSP_FIELDNAMES_TOPK, output_file)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(run_task, fn): fn for fn in tasks}
+        for future in as_completed(futures):
+            fn = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Task ({fn}) raised unexpected exception: {e}", flush=True)
 
 
 # SAT COMPETITION HELPER FUNCTIONS
