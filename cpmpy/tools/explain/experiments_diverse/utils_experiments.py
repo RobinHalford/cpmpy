@@ -61,7 +61,6 @@ def write_results_to_csv(result, fieldnames, output_file):
                 pass
 
 
-
 def execute_solver_combinations(time_limit: int, output_file_NR: str, output_file_xcsp: str):
     dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
     data, metadata = dataset[0]
@@ -85,7 +84,6 @@ def execute_solver_combinations(time_limit: int, output_file_NR: str, output_fil
     execute_solver_combination_instance(instance, model, time_limit, output_file_xcsp)
     print("finished xcsp instance")
     return
-
 
 
 def execute_solver_combination_instance(instance, model, time_limit: int, output_file: str):
@@ -143,7 +141,6 @@ def execute_solver_combination_instance(instance, model, time_limit: int, output
                         result["status"] = "error"
                         result["error_message"] = str(e)
                     write_results_to_csv(result, fieldnames, output_file)
-
 
 
 def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_factor, time_limit, output_file):
@@ -296,7 +293,6 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         gc.collect()
         
         queue.put(result)
-
 
 
 def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, time_limit, num_mus):
@@ -495,23 +491,3 @@ def execute_xcsp_top_k(num_mus, solver, map_solver, time_limit, output_file, max
                 future.result()
             except Exception as e:
                 print(f"Task ({fn}) raised unexpected exception: {e}", flush=True)
-
-
-# SAT COMPETITION HELPER FUNCTIONS
-def enum_sat_competition_instances():
-    with open(DATA_DIR / "unsat_instances_2025.uri", "r") as f:
-        count = 0
-        for line in f:
-            url = line.strip()
-            if not url:
-                continue
-            else:
-                # load instance from url and yield model
-                try:
-                    # download file to temporary location
-                    tmp_path = DATA_DIR / "satcompinstances" / f"tmp_instance_{count}.txt"
-                    urlretrieve(url, str(tmp_path))
-                    count += 1
-                except (HTTPError, URLError) as e:
-                    raise ValueError(f"No dataset available on {url}. Error: {str(e)}")
-    return

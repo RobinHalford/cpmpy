@@ -59,13 +59,6 @@ def test_solver_combinations(time_limit: int, output_dir: str):
     output_file_xcsp = str(output_dir / f"solver_combinations_xcsp_{timestamp}.csv")
     execute_solver_combinations(time_limit=time_limit, output_file_NR=output_file_NR, output_file_xcsp=output_file_xcsp)
     return
-
-
-# sat competition experiments
-
-def load_sat_competition_instances():
-    enum_sat_competition_instances()
-    return
     
 
 def benchmark_NR(num_mus: int, solver: str, 
@@ -164,10 +157,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # use **vars(args) to pass all arguments to the benchmark functions
-    # test_solver_combinations(200,"results")
     # benchmark_NR(**vars(args))
-    # benchmark_sat_competition(**vars(args))
     # benchmark_xcsp_MUS(**vars(args))
     benchmark_xcsp_until_diverse(**vars(args))
-    # experiments_NR()
-    # load_sat_competition_instances()

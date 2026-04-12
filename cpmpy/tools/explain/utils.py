@@ -68,18 +68,14 @@ class OCUSException(Exception):
     pass
 
 
-def diversity(set1, set2, measure="overlap", c_size = 0):
+def diversity(set1, set2, measure="overlap"):
     """
         Compute the diversity between two sets of constraints (can be MUS, MCS, MSS, ...).
-        Can be used as a measure to obtain diverse explanations. ()
-        Provide a diversity measure with `measure` param.
-
-        The value of a diversity is always between 0 and 1, where 1 is the highest diversity possible and zero the lowest.
+        Diversity is always between 0 and 1.
 
         :param: set1: the first set
         :param: set2: the second set
         :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")
-        :param: c_size: the size of C (set of all constraints), use this when you want to normalize the diversity with |C|. Measure is ignored if you use this parameter. 
     """
     set1, set2 = frozenset(set1), frozenset(set2)
     s1, s2 = len(set1), len(set2)
@@ -90,12 +86,6 @@ def diversity(set1, set2, measure="overlap", c_size = 0):
         return 1
 
     common = len(set1 & set2)
-
-    if c_size != 0:
-        assert (s1 <= c_size) & (s2 <= c_size), "Size of a subset can not be bigger than its superset."
-        union = s1 + s2 - common
-        score = (union - common) / c_size
-        return score
 
     if measure in ("Jaccard", "Jaccard index"):
         union = s1 + s2 - common
@@ -110,49 +100,36 @@ def diversity(set1, set2, measure="overlap", c_size = 0):
         score = 1 - overlap
         return score
     
-    elif measure in ("set difference", "symmetric set difference"):
-        # normalized symmetric set difference is the same as (1 - jaccardIndex) so this is kinda pointless
-        union = s1 + s2 - common
-        diff = union - common
-        return diff / union
-    
-    elif measure in ("Dice-Sørensen", "Dice-Sorensen", "Dice", "Sorensen", "Sorensen index", "DSC"):
-        # DSC = (2 * |A ∩ B|) / (|A|+|B|)
-        dsc = (2 * common) / (s1 + s2)
-        return 1 - dsc
-    
     else:
         raise ValueError(f"Unknown diversity measure: {measure}")
 
 
-def diversity_matrix(list_of_sets, measure="overlap", c_size=0):
+def diversity_matrix(list_of_sets, measure="overlap"):
     """
         Computes the diversity matrix (upper triangular) with the pairwise diversities between all the sets of `list_of_sets`.
         The value at index [i, j] is the diversity between set i and set j.
 
         :param: list_of_sets: A list of sets for which the diversity matrix will be computed
         :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")
-        :param: c_size: the size of C (set of all constraints), use this when you want to normalize the diversity with |C|. Measure is ignored if you use this parameter. 
     """
     n = len(list_of_sets)
     divs = np.zeros((n,n))
 
     for (i, j) in combinations(range(n), 2):
         a, b = list_of_sets[i], list_of_sets[j]
-        divs[i, j] = diversity(a, b, measure, c_size)
+        divs[i, j] = diversity(a, b, measure)
 
     return divs
 
 
-def average_diversity(list_of_sets, measure="overlap", c_size=0):
+def average_diversity(list_of_sets, measure="overlap"):
     """
         Computes the average pairwise diversity between all the sets of `list_of_sets`.
         The value is the average of all the values in the upper triangular of the diversity matrix.
 
         :param: list_of_sets: A list of sets for which the average diversity will be computed
         :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")
-        :param: c_size: the size of C (set of all constraints), use this when you want to normalize the diversity with |C|. Measure is ignored if you use this parameter. 
     """
-    divs = diversity_matrix(list_of_sets, measure, c_size)
+    divs = diversity_matrix(list_of_sets, measure)
     avg = divs[np.triu_indices_from(divs, k=1)].mean()
     return avg

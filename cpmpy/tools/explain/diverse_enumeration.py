@@ -8,7 +8,11 @@ from cpmpy.solvers.solver_interface import ExitStatus
 
 
 def remaining_time(deadline):
-    """Seconds left in the global budget, or None if unlimited."""
+    """
+        Seconds left in the global budget, or None if unlimited.
+
+        :param deadline: deadline (used with time.monotonic())
+    """
     if deadline is None:
         return None
     return deadline - time.monotonic()
@@ -17,7 +21,10 @@ def remaining_time(deadline):
 def timed_solve(solver, deadline, **kwargs):
     """
         Solve with remaining global time.
-        Returns solver result, or None if the global time budget is exhausted.
+        Returns solver result or None if the global time budget is exhausted.
+
+        :param solver: the solver to use the timed solve.
+        :param deadline: the deadline for the time limit.
     """
     rem = remaining_time(deadline)
     if rem is not None and rem <= 0:
@@ -36,29 +43,35 @@ def timed_solve(solver, deadline, **kwargs):
 
 
 def overlap_CP_EXPR(x, y):
+    """
+        Returns the CPMpy Expression that represents the Overlap similarity between x and y.
+        The Overlap is represented as an integer between 0 and 100 because CPMpy doesn't support float division.
+
+        :param x: a list or np.array, the first list
+        :param y: a list or np.array, the second list
+    """
     x = np.array(x)
     y = np.array(y)
     return (100 * cp.sum((x & y))) // cp.min([cp.sum(x), cp.sum(y)])
 
 
-
-
-# enumerate MUSes with marco, at every iteration grow the diversity matrix and
-# return the top k diverse MUSes when diversity of 1 is reached or time runs out
-def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="exact", return_mcs=False):
+def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="exact"):
     """
-    Enumerate MUSes with marco until either an optimally diverse set of k MUSes
-    is found (pairwise avg diversity >= 1), or the time limit is exhausted.
-    Returns the most diverse subset of k MUSes found (or all MUSes if fewer than k found).
+        Enumerate MUSes with marco until either an optimally diverse set of k MUSes
+        is found (pairwise avg diversity >= 1), or the time limit is exhausted.
+        Returns the status, most diverse subset of k MUSes found, the timestamps at which they were found 
+        and the total amount of MUSes that were generated during the entire process.
 
-    :param constraints: soft constraints
-    :param k: desired number of diverse MUSes
-    :param time_limit: total time budget in seconds (2s buffer reserved for post-processing)
-    :param solver: assumption-capable solver (e.g. "exact", "ortools")
-    :param map_solver: map solver (e.g. "exact", "gurobi")
+        :param constraints: soft constraints
+        :param k: desired number of diverse MUSes
+        :param time_limit: total time budget in seconds (a 2s buffer is reserved for post-processing)
+        :param solver: name of a solver, must support assumptions (e.g, "ortools", "exact", "z3" or "pysat")
+        :param map_solver: the hitting-set (MAP) solver to use, ideally incremental such as "gurobi", "pysat" or "exact"
+        
     """
+
     start_time = time.monotonic()
-    deadline = start_time + time_limit - 2
+    deadline = start_time + time_limit - 2  # reserve 2 seconds for post-processing
 
     muses = []
     top_muses = []
@@ -67,11 +80,11 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     div_matrix = np.zeros((0, 0), dtype=float)
     top_indx = None
     avg = 0
-
+    # enumerate MUSes with MARCO given the deadline
     for label, mus, _ in timed_marco(constraints, solver=solver, map_solver=map_solver,
-                                              time_limit=remaining_time(deadline), return_mcs=return_mcs):
+                                              time_limit=remaining_time(deadline), return_mcs=False):
         if label == "TIMEOUT":
-            break
+            break  # uses remaining 2 seconds returning the results
         if label != "MUS":
             continue
         times.append(time.monotonic() - start_time)
@@ -85,7 +98,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         else:
             div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)), mode="constant")
             for l in range(j):
-                div_matrix[l, j] = diversity(muses[l], mus)
+                div_matrix[l, j] = diversity(muses[l], mus, measure="overlap")
 
         # Once we have at least k MUSes, track the most diverse k-subset
         if j == k - 1:
@@ -101,7 +114,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
                 break
 
     if top_indx is None:
-        # Fewer than k MUSes found — return all of them
+        # Fewer than k MUSes found —> return all of them
         top_muses = muses
         top_times = times
         return "TIMEOUT", top_muses, top_times, len(muses)
@@ -114,15 +127,15 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
 def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
     """
         A modified version of MARCO where the Grow and Shrink procedures' selection order is favoring diversity, 
-        and the solution hint is set to promote unseen constraints.
+        and the map solver is minimizes seen constraints.
 
         :param: solver: name of a solver, must support assumptions (e.g, "ortools", "exact", "z3" or "pysat")
-        :param: map_solver: the hitting-set (MAP) solver to use, ideally incremental such as "gurobi", "pysat" or "exact"
+        :param: map_solver: the hitting-set (MAP) solver to use, ideally incremental such as "gurobi", "pysat" or "exact", must support objective function
         :param: return_mus: whether the algorithm should return MUSes
         :param: return_mcs: whether the algorithm should return MCSes
         :param: do_solution_hint: when true, will favor large seeds generated by the map-solver, and hence more likely
                                      to return MUSes. Especially useful when `return_mus=True`.
-        :param: time_limit: time limit for a single solve call in seconds.
+        :param: time_limit: total global time budget in seconds.
     """
     start_time = time.monotonic()
     deadline = None if time_limit is None else start_time + time_limit
@@ -134,18 +147,17 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
 
     # map solver for computing hitting sets
     map_solver = cp.SolverLookup.get(map_solver)
+    do_solution_hint = do_solution_hint and hasattr(map_solver, 'solution_hint')  # solver may not support solution hinting...
 
     map_solver += cp.any(assump)
-
-    if do_solution_hint and hasattr(map_solver, 'solution_hint'):
+    if do_solution_hint:
         map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
 
-    # deletion order based on already seen constraints
     # keep a map of which constraints are seen in previously generated MUSes
     seenmap = dict(zip(assump, [0]*len(assump)))
     
     while True:
-        
+        # get a seed from the map
         map_result = timed_solve(map_solver, deadline)
         if map_result is None:
             yield "TIMEOUT", None, time.monotonic() - start_time
@@ -155,6 +167,7 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
 
         seed = [a for a in assump if a.value()]
 
+        # check if seed is sat or unsat
         sat_result = timed_solve(s, deadline, assumptions=seed)
         if sat_result is None:
             yield "TIMEOUT", None, time.monotonic() - start_time
@@ -181,12 +194,9 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
             if return_mcs:
                 yield "MCS", [dmap[a] for a in mcs], time.monotonic() - start_time
 
-
         else: 
             # UNSAT, shrink to MUS, re-use MUSX
-            # Shrink with already seen constraints first 
-            # (remove similarity in MUSes) 
-
+            # Shrink with already seen constraints first
             core = set(s.get_core())
             for c in sorted(core, key=seenmap.get, reverse=True):
                 if c not in core: # already removed
@@ -209,12 +219,12 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
 
             if return_mus:
                 yield "MUS", [dmap[a] for a in core], time.monotonic() - start_time
-
+        
+        # Minimize over already seen constraints for next seed calculation
         map_solver.minimize(cp.sum([seenmap[a] for a in assump]*assump)) 
 
 
-
-def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
+def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, time_limit=None):
     """
         A modified version of MARCO where the Grow and Shrink procedures' selection order is favoring diversity, 
         and the solution hint is set to promote unseen constraints.
@@ -225,11 +235,12 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
         :param: return_mcs: whether the algorithm should return MCSes
         :param: do_solution_hint: when true, will favor large seeds generated by the map-solver, and hence more likely
                                      to return MUSes. Especially useful when `return_mus=True`.
-        :param: time_limit: time limit for a single solve call in seconds.
+        :param: time_limit: total global time budget in seconds.
     """
     start_time = time.monotonic()
     deadline = None if time_limit is None else start_time + time_limit
     assert hasattr(cp.SolverLookup.get(solver), "get_core"), "MARCO requires a solver that supports assumption variables"
+    assert hasattr(cp.SolverLookup.get(map_solver), "solution_hint"), "This version of MARCO requires a map solver that supports solution hinting"
 
     model, soft, assump = make_assump_model(soft, hard)
     dmap = dict(zip(assump, soft))
@@ -239,16 +250,14 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
     map_solver = cp.SolverLookup.get(map_solver)
 
     map_solver += cp.any(assump)
-
-    if do_solution_hint:
-        map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
+    
+    map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
   
-    # deletion order based on already seen constraints
     # keep a map of which constraints are seen in previously generated MUSes
     seenmap = dict(zip(assump, [0]*len(assump)))
     
     while True:
-        
+        # get a seed from the map
         map_result = timed_solve(map_solver, deadline)
         if map_result is None:
             yield "TIMEOUT", None, time.monotonic() - start_time
@@ -258,6 +267,7 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
         
         seed = [a for a in assump if a.value()]
 
+        # check if seed is sat or unsat
         sat_result = timed_solve(s, deadline, assumptions=seed)
         if sat_result is None:
             yield "TIMEOUT", None, time.monotonic() - start_time
@@ -314,10 +324,8 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
             if return_mus:
                 yield "MUS", [dmap[a] for a in core], time.monotonic() - start_time
         
-        # update solution hint is still active
-        if do_solution_hint:
-            map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
-
+        # update solution hint
+        map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
 
 
 def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
@@ -331,7 +339,7 @@ def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", ret
         :param: return_mcs: whether the algorithm should return MCSes
         :param: do_solution_hint: when true, will favor large seeds generated by the map-solver, and hence more likely
                                      to return MUSes. Especially useful when `return_mus=True`.
-        :param: time_limit: time limit for a single solve call in seconds.
+        :param: time_limit: total global time budget in seconds.
     """
     start_time = time.monotonic()
     deadline = None if time_limit is None else start_time + time_limit
@@ -351,12 +359,11 @@ def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", ret
     if do_solution_hint:
         map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
   
-    # deletion order based on already seen constraints
     # keep a map of which constraints are seen in previously generated MUSes
     seenmap = dict(zip(assump, [0]*len(assump)))
     
     while True:
-        
+        # get a seed from the map
         map_result = timed_solve(map_solver, deadline)
         if map_result is None:
             yield "TIMEOUT", None, time.monotonic() - start_time
@@ -366,6 +373,7 @@ def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", ret
         
         seed = [a for a in assump if a.value()]
 
+        # check if seed is sat or unsat
         sat_result = timed_solve(s, deadline, assumptions=seed)
         if sat_result is None:
             yield "TIMEOUT", None, time.monotonic() - start_time
@@ -434,14 +442,19 @@ def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", ret
         map_solver.minimize(overlap) # equivalent to maximizing diversity
 
 
-# enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
-# and block the previously found MUSes in the hitting set solver
-# ORTOOLS appears to be faster here than the exact solver for hitting set computation
 def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=None):
+    """
+        A modified version of the OCUS algorithm that enumerates k diverse MUSes one by one, starting with the smallest MUS
+        and then computing each next MUS with the weights of seen constraints increased by the size of the last found MUS.
+
+        :param: solver: name of a solver, must support assumptions (e.g, "ortools", "exact", "z3" or "pysat")
+        :param: hs_solver: the hitting-set solver to use, ideally incremental such as "gurobi"
+        :param: time_limit: the global time budget in seconds.
+    """
     start_time = time.monotonic()
     deadline = None if time_limit is None else start_time + time_limit
     
-    assert hasattr(cp.SolverLookup.get(solver), "get_core"), f"optimal_mus requires a solver that supports assumption variables, use optimal_mus_naive with {solver} instead"
+    assert hasattr(cp.SolverLookup.get(solver), "get_core"), f"optimal_mus requires a solver that supports assumption variables"
     model, soft, assump = make_assump_model(soft, hard)
     dmap = dict(zip(assump, soft))
     seenmap = dict(zip(assump, [1]*len(assump)))
@@ -504,6 +517,7 @@ def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=
             return
         hitting_set = set(unsat_hitting_set)
         inc = len(hitting_set)
+        # increase the weights of all seen constraints in this MUS by len(MUS)
         for a in hitting_set:
             seenmap[a] += inc
         # block found MUS in hitting set solver
@@ -511,12 +525,16 @@ def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=
         yield "MUS", [dmap[a] for a in hitting_set], time.monotonic() - start_time
     
 
-
-# enumerate k amount of MUSes with ocus, updating the objective every iteration (minimize the constraints that are already found)
-# and block the previously found MUSes in the hitting set solver
-# ORTOOLS appears to be faster here than the exact solver for hitting set computation
-# VERSION WHERE WEIGHTS ARE ZERO FOR UNSEEN CONSTRAINTS AND WITH SHRINKING
 def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=None):
+    """
+        A modified version of the OCUS algorithm that enumerates k diverse MUSes one by one, starting with the smallest MUS,
+        and then resetting all weights to zero. All the seen constraints' weights are then set to 1.
+        After finding a unsat subset, the Shrink procedure is done because this doesn't guarantee MUSes (weights can be zero).
+
+        :param: solver: name of a solver, must support assumptions (e.g, "ortools", "exact", "z3" or "pysat")
+        :param: hs_solver: the hitting-set solver to use, ideally incremental such as "gurobi"
+        :param: time_limit: the global time budget in seconds.
+    """
     start_time = time.monotonic()
     deadline = None if time_limit is None else start_time + time_limit
     
@@ -614,7 +632,15 @@ def ocus_enum_shrink(soft, hard=[], solver="ortools", hs_solver="gurobi", time_l
 
 
 def ocus_enum_opt_nextMUS(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=None):
-    
+    """
+        A modified version of the OCUS algorithm that enumerates k diverse MUSes one by one, starting with the smallest MUS,
+        then computing the next MUS based on the objective function that minimizes the overlap between the next MUS and all 
+        previously found MUSes. The unsat subset is shrunk because the objective is not monotonically increasing.
+
+        :param: solver: name of a solver, must support assumptions (e.g, "ortools", "exact", "z3" or "pysat")
+        :param: hs_solver: the hitting-set solver to use, ideally incremental such as "gurobi"
+        :param: time_limit: the global time budget in seconds.
+    """
     start_time = time.monotonic()
     deadline = None if time_limit is None else start_time + time_limit
 
@@ -716,7 +742,6 @@ def ocus_enum_opt_nextMUS(soft, hard=[], solver="ortools", hs_solver="gurobi", t
         yield "MUS", [dmap[a] for a in hitting_set], time.monotonic() - start_time
 
 
-# helper function
 def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
     """
         Returns a tuple with the indeces of the top-k highest average in the matrix.
