@@ -301,13 +301,14 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
 
 def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, time_limit, num_mus):
     
-    fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
+    fieldnames = ["instance", "algorithm", "solver", "map_solver", "status", "runtimes", "total_num_mus", "error_message", "MUSes"]
 
     result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
     result["instance"] = filename
     result["algorithm"] = "marco_until_diverse"
     result["solver"] = solver
     result["map_solver"] = map_solver
+    result["total_num_mus"] = 0
     result["error_message"] = None
     result["status"] = "STARTED"  # default unless proven otherwise
 
@@ -321,7 +322,7 @@ def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, ti
         model = cp.Model().from_file(path)
         constraint_to_idx = {id(c): i for i, c in enumerate(model.constraints)}
 
-        status, muses, runtimes = marco_until_diverse(model.constraints, num_mus, time_limit=time_limit, solver=solver, map_solver=map_solver)
+        status, muses, runtimes, total_num_mus = marco_until_diverse(model.constraints, num_mus, time_limit=time_limit, solver=solver, map_solver=map_solver)
         if status == "COMPLETE":
             result["status"] = "COMPLETE"
         elif status == "TIMEOUT":
@@ -338,6 +339,7 @@ def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, ti
         muses = [[constraint_to_idx[id(c)] for c in subset] for subset in muses]
         result["MUSes"] = muses
         result["runtimes"] = runtimes
+        result["total_num_mus"] = total_num_mus
         # Explicit cleanup inside subprocess
         del generator
         del model
@@ -352,8 +354,8 @@ _XCSP_FIELDNAMES = [
     "instance", "algorithm", "solver", "map_solver", "hs_solver",
     "status", "runtimes", "error_message", "MUSes"
 ]
-_XCSP_FIELDNAMES_TOPK = [ "instance", "algorithm", "solver", "map_solver",
-    "status", "runtimes", "error_message", "MUSes"]
+_XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
+    "status", "runtimes", "total_num_mus" ,"error_message", "MUSes"]
 
 
 def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
@@ -421,6 +423,7 @@ def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
         result["solver"] = solver
         result["map_solver"] = map_solver
         result["status"] = "ERROR"
+        result["total_num_mus"] = 0
         result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
         result["runtimes"] = []
         result["MUSes"] = []
@@ -441,7 +444,6 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
 
     algorithms = [
         "marco",
-        # "marco_select_top_k",
         "marco_diverse_noMin",
         "marco_diverse_min",
         "marco_diverse_opt",
