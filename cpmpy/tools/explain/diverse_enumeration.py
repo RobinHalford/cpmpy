@@ -58,10 +58,12 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     :param map_solver: map solver (e.g. "exact", "gurobi")
     """
     start_time = time.monotonic()
-    deadline = start_time + time_limit
+    deadline = start_time + time_limit - 2
 
     muses = []
+    top_muses = []
     times = []
+    top_times = []
     div_matrix = np.zeros((0, 0), dtype=float)
     top_indx = None
     avg = 0
@@ -69,7 +71,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     for label, mus, _ in timed_marco(constraints, solver=solver, map_solver=map_solver,
                                               time_limit=remaining_time(deadline), return_mcs=return_mcs):
         if label == "TIMEOUT":
-            return "TIMEOUT", muses, times
+            break
         if label != "MUS":
             continue
         times.append(time.monotonic() - start_time)
@@ -106,7 +108,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         top_muses = [muses[i] for i in top_indx]
         top_times = [times[i] for i in top_indx]
 
-    return "MUS", top_muses, top_times, len(muses)
+    return "COMPLETE", top_muses, top_times, len(muses)
 
 
 def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
