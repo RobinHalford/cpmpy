@@ -106,7 +106,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         top_muses = [muses[i] for i in top_indx]
         top_times = [times[i] for i in top_indx]
 
-    return "MUS", top_muses, top_times
+    return "MUS", top_muses, top_times, len(muses)
 
 
 def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
