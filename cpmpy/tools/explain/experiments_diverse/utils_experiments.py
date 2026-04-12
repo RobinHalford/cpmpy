@@ -317,6 +317,7 @@ def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, ti
     
     runtimes = []
     muses = []
+    total_num_mus = 0
         
     try:
         model = cp.Model().from_file(path)
