@@ -220,7 +220,9 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
 
 
 def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
-    
+    """
+        Run one XCSP instance for the given algorithm.
+    """
     fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
 
     result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
@@ -296,7 +298,9 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
 
 
 def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, time_limit, num_mus):
-    
+    """
+        Run one XCSP instance for marco until diverse. 
+    """
     fieldnames = ["instance", "algorithm", "solver", "map_solver", "status", "runtimes", "total_num_mus", "error_message", "MUSes"]
 
     result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
@@ -356,7 +360,9 @@ _XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
 
 
 def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
-    """Spawn a subprocess for one (filename, algorithm) pair and return the result dict."""
+    """
+        Create  a subprocess for one (filename, algorithm) pair and return the result dict.
+    """
     queue = mp.Queue()
     proc = mp.Process(
         target=run_single_xcsp_instance,
@@ -395,7 +401,9 @@ def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, tim
 
 
 def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
-    """Spawn a subprocess for one (filename, algorithm) pair and return the result dict."""
+    """
+        Create a subprocess for one instance and return the result dict.
+    """
     queue = mp.Queue()
     proc = mp.Process(
         target=run_single_xcsp_instance_top_k,
@@ -434,6 +442,9 @@ def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
 
 
 def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file, max_workers=4):
+    """
+        Starts multi-threaded experiments on XCSP instances with all algorithms except marco until diverse.
+    """
     filenames = pd.read_csv(
         DATA_DIR / "constraints_stats.csv",
         usecols=["filename"]
@@ -472,6 +483,9 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
 
 
 def execute_xcsp_top_k(num_mus, solver, map_solver, time_limit, output_file, max_workers=4):
+    """
+        Starts multi-threaded experiments on XCSP instances for MARCO until diverse (top k).
+    """
     filenames = pd.read_csv(
         DATA_DIR / "constraints_stats.csv",
         usecols=["filename"]
