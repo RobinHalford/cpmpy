@@ -152,11 +152,11 @@ if __name__ == "__main__":
     parser.add_argument('--solver', type=str, required=True, help="The SAT solver to use.")
     parser.add_argument('--map-solver', type=str, required=True, help="The map-solver to use.")
     parser.add_argument('--hs-solver', type=str, required=True, help="The hitting set solver to use.")
-    parser.add_argument('--time-limit', type=int, default=120, help="Time limit in seconds per instance.")
+    parser.add_argument('--time-limit', type=int, default=60, help="Time limit in seconds per instance.")
     parser.add_argument('--output-dir', type=str, default='results', help="Directory where result CSV files will be saved.")
     args = parser.parse_args()
 
     # use **vars(args) to pass all arguments to the benchmark functions
     # benchmark_NR(**vars(args))
-    # benchmark_xcsp_MUS(**vars(args))
-    benchmark_xcsp_until_diverse(**vars(args))
+    benchmark_xcsp_MUS(**vars(args))
+    # benchmark_xcsp_until_diverse(**vars(args))
