@@ -24,14 +24,8 @@ Optional Arguments
 --output-dir : str, default='results'
     Directory where result CSV files will be saved.
 """
-
-import sys
-import os
-import time
 from datetime import datetime
-import csv
 import cpmpy as cp
-import numpy as np
 import importlib
 importlib.reload(cp)
 import argparse
@@ -39,7 +33,7 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
-from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances , enum_sat_competition_instances, execute_solver_combinations, execute_xcsp_top_k
+from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances, execute_solver_combinations, execute_xcsp_top_k
 
 
 def test_solver_combinations(time_limit: int, output_dir: str):
