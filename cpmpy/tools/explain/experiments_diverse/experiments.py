@@ -152,5 +152,5 @@ if __name__ == "__main__":
 
     # use **vars(args) to pass all arguments to the benchmark functions
     # benchmark_NR(**vars(args))
-    benchmark_xcsp_MUS(**vars(args))
-    # benchmark_xcsp_until_diverse(**vars(args))
+    # benchmark_xcsp_MUS(**vars(args))
+    benchmark_xcsp_until_diverse(**vars(args))
