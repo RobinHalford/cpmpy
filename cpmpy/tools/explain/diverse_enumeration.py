@@ -1,6 +1,6 @@
 import cpmpy as cp
 import numpy as np
-from .utils import make_assump_model, diversity
+from .utils import make_assump_model, diversity_pair
 from itertools import combinations
 from cpmpy.tools.explain.marco import timed_marco
 import time
@@ -58,8 +58,8 @@ def overlap_CP_EXPR(x, y):
 def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="exact"):
     """
         Enumerate MUSes with marco until either an optimally diverse set of k MUSes
-        is found (pairwise avg diversity >= 1), or the time limit is exhausted.
-        Returns the status, most diverse subset of k MUSes found, the timestamps at which they were found 
+        is found (pairwise min diversity >= 1), or the time limit is exhausted.
+        Returns the status, most diverse subset of k MUSes found, the timestamps at which they were found
         and the total amount of MUSes that were generated during the entire process.
 
         :param constraints: soft constraints
@@ -67,7 +67,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         :param time_limit: total time budget in seconds (a 2s buffer is reserved for post-processing)
         :param solver: name of a solver, must support assumptions (e.g, "ortools", "exact", "z3" or "pysat")
         :param map_solver: the hitting-set (MAP) solver to use, ideally incremental such as "gurobi", "pysat" or "exact"
-        
+
     """
 
     start_time = time.monotonic()
@@ -79,7 +79,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     top_times = []
     div_matrix = np.zeros((0, 0), dtype=float)
     top_indx = None
-    avg = 0
+    min_div = 0
     # enumerate MUSes with MARCO given the deadline
     for label, mus, _ in timed_marco(constraints, solver=solver, map_solver=map_solver,
                                               time_limit=remaining_time(deadline), return_mcs=False):
@@ -98,19 +98,19 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         else:
             div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)), mode="constant")
             for l in range(j):
-                div_matrix[l, j] = diversity(muses[l], mus, measure="overlap")
+                div_matrix[l, j] = diversity_pair(muses[l], mus, measure="overlap")
 
         # Once we have at least k MUSes, track the most diverse k-subset
         if j == k - 1:
             # First time we have exactly k MUSes: only one combination, full scan
-            top_indx, avg = select_top_k(div_matrix, k, incremental_last=False)
-            if avg >= 1:
+            top_indx, min_div = select_top_k(div_matrix, k, incremental_last=False)
+            if min_div >= 1:
                 break
         elif j >= k:
             # Incrementally check only combinations that include the newest MUS
-            top_indx, avg = select_top_k(div_matrix, k, incremental_last=True,
-                                          max_comb=top_indx, max_avg=avg)
-            if avg >= 1:
+            top_indx, min_div = select_top_k(div_matrix, k, incremental_last=True,
+                                              max_comb=top_indx, max_min_div=min_div)
+            if min_div >= 1:
                 break
 
     if top_indx is None:
@@ -436,10 +436,10 @@ def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", ret
         if do_solution_hint:
             map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
         
-        # minimize the overlap (= max. diversity) of pairs with all previous MUSes
+        # minimize the max overlap (= maximize min diversity) over all pairs with previous MUSes
         overlaps = [overlap_CP_EXPR(assump, prev) for prev in prev_MUSes_assump]
-        overlap = cp.sum(overlaps) # sum overlaps of all pairs (average overlap)
-        map_solver.minimize(overlap) # equivalent to maximizing diversity
+        overlap = cp.max(overlaps) # max overlap over all pairs (minimizing this maximizes min diversity)
+        map_solver.minimize(overlap)
 
 
 def ocus_enum_1(soft, hard=[], solver="ortools", hs_solver="gurobi", time_limit=None):
@@ -666,10 +666,10 @@ def ocus_enum_opt_nextMUS(soft, hard=[], solver="ortools", hs_solver="gurobi", t
         if first:
             hs_solver.minimize(cp.sum(assump * np.ones(len(assump), dtype=int)))
         else:
-            # minimize the overlap (= max. diversity) of pairs with all previous MUSes
+            # minimize the max overlap (= maximize min diversity) over all pairs with previous MUSes
             overlaps = [overlap_CP_EXPR(assump, prev) for prev in prev_MUSes_assump]
-            overlap = cp.sum(overlaps) # sum overlaps of all pairs (average overlap)
-            hs_solver.minimize(overlap) # equivalent to maximizing diversity
+            overlap = cp.max(overlaps) # max overlap over all pairs (minimizing this maximizes min diversity)
+            hs_solver.minimize(overlap)
 
          # hitting set loop
         unsat_hitting_set = None
@@ -742,9 +742,9 @@ def ocus_enum_opt_nextMUS(soft, hard=[], solver="ortools", hs_solver="gurobi", t
         yield "MUS", [dmap[a] for a in hitting_set], time.monotonic() - start_time
 
 
-def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
+def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_min_div=0):
     """
-        Returns a tuple with the indeces of the top-k highest average in the matrix.
+        Returns a tuple with the indices of the top-k subset with the highest minimal pairwise diversity in the matrix.
 
         :param: matrix: the upper triangular matrix with values
         :param: k: the size of the top subset to be computed
@@ -754,42 +754,25 @@ def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_avg = 0):
 
     n = len(matrix)
 
-    if k <= 0 or n<=1:
-        return max_comb, max_avg
-    
-    total_pairs = k * (k - 1) / 2.0
+    if k <= 0 or n <= 1:
+        return max_comb, max_min_div
 
     if incremental_last:
-
         last = n - 1
-        for base in combinations(range(n-1),k-1):
+        for base in combinations(range(n - 1), k - 1):
             comb = base + (last,)
-            # print(f"combination: {comb}")
-            curr_sum = 0
-            for indx in combinations(comb, 2):
-                curr_sum += matrix[indx]
-                # print(f"taking avg elem: {matrix[indx]}")
+            curr_min = min(matrix[indx] for indx in combinations(comb, 2))
 
-            curr_avg = curr_sum / total_pairs
-            # print(f"The avg div of this combination was: {curr_avg}.")
-
-            if curr_avg > max_avg:
-                max_avg = curr_avg
+            if curr_min > max_min_div:
+                max_min_div = curr_min
                 max_comb = comb
-    
+
     else:
         for comb in combinations(range(n), k):
-            curr_sum = 0
-            # print(f"combination: {comb}")
-            for indx in combinations(comb, 2):
-                # print(f"taking avg elem: {matrix[indx]}")
-                curr_sum += matrix[indx]
-        
-            curr_avg = curr_sum / total_pairs
-            # print(f"The avg div of this combination was: {curr_avg}.")
+            curr_min = min(matrix[indx] for indx in combinations(comb, 2))
 
-            if curr_avg > max_avg:
-                max_avg = curr_avg
+            if curr_min > max_min_div:
+                max_min_div = curr_min
                 max_comb = comb
 
-    return max_comb, max_avg
+    return max_comb, max_min_div

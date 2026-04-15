@@ -8,7 +8,7 @@ from typing import List, Sequence
 import pandas as pd
 import numpy as np
 
-from cpmpy.tools.explain.utils import average_diversity, diversity_matrix
+from cpmpy.tools.explain.utils import diversity_setOfMUSes, diversity_matrix
 from cpmpy.tools.explain.visualize_diversity import visualize_heatmap
 
 def parse_runtime_list(text: str) -> List[float]:
@@ -67,7 +67,7 @@ def diversity_per_instance(input_csv: Path, output_csv: Path) -> None:
                 "status": row["status"],
                 "num_muses": len(muses),
                 "total_runtime": total_runtime(runtimes),
-                "avg_diversity": average_diversity(muses) if len(muses) > 1 else 0,
+                "avg_diversity": diversity_setOfMUSes(muses) if len(muses) > 1 else 0,
             }
         )
 

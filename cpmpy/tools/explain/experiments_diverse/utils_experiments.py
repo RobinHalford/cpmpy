@@ -19,7 +19,7 @@ import time
 from cpmpy.tools.explain.mus import smus
 from cpmpy.tools.explain.marco import timed_marco
 from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
-from cpmpy.tools.explain.utils import average_diversity
+from cpmpy.tools.explain.utils import diversity_setOfMUSes
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
 

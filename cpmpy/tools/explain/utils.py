@@ -68,7 +68,7 @@ class OCUSException(Exception):
     pass
 
 
-def diversity(set1, set2, measure="overlap"):
+def diversity_pair(set1, set2, measure="overlap"):
     """
         Compute the diversity between two sets of constraints (can be MUS, MCS, MSS, ...).
         Diversity is always between 0 and 1.
@@ -117,19 +117,19 @@ def diversity_matrix(list_of_sets, measure="overlap"):
 
     for (i, j) in combinations(range(n), 2):
         a, b = list_of_sets[i], list_of_sets[j]
-        divs[i, j] = diversity(a, b, measure)
+        divs[i, j] = diversity_pair(a, b, measure)
 
     return divs
 
 
-def average_diversity(list_of_sets, measure="overlap"):
+def diversity_setOfMUSes(list_of_sets, measure="overlap"):
     """
-        Computes the average pairwise diversity between all the sets of `list_of_sets`.
-        The value is the average of all the values in the upper triangular of the diversity matrix.
+        Returns the minimal pairwise diversity between all the sets of `list_of_sets`.
+        The value is the minimal of all the values in the upper triangular of the diversity matrix.
 
-        :param: list_of_sets: A list of sets for which the average diversity will be computed
+        :param: list_of_sets: A list of sets for which the diversity will be computed
         :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")
     """
     divs = diversity_matrix(list_of_sets, measure)
-    avg = divs[np.triu_indices_from(divs, k=1)].mean()
-    return avg
+    min_div = divs[np.triu_indices_from(divs, k=1)].min()
+    return min_div
