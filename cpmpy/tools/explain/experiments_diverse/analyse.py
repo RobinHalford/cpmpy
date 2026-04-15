@@ -67,7 +67,7 @@ def diversity_per_instance(input_csv: Path, output_csv: Path) -> None:
                 "status": row["status"],
                 "num_muses": len(muses),
                 "total_runtime": total_runtime(runtimes),
-                "avg_diversity": diversity_setOfMUSes(muses) if len(muses) > 1 else 0,
+                "min_diversity": diversity_setOfMUSes(muses) if len(muses) > 1 else 0,
             }
         )
 
@@ -85,12 +85,12 @@ def compare_to_marco_per_instance(summary_csv: Path, output_csv: Path) -> None:
         "algorithm",
         "status",
         "total_runtime",
-        "avg_diversity",
+        "min_diversity",
     }
     missing = required_cols - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
-    
+
     # Start with NaN for everything
     df["diversity_gain_vs_marco"] = np.nan
     df["additional_runtime_vs_marco"] = np.nan
@@ -99,10 +99,10 @@ def compare_to_marco_per_instance(summary_csv: Path, output_csv: Path) -> None:
     df.loc[marco_mask, ["diversity_gain_vs_marco", "additional_runtime_vs_marco"]] = 0.0
 
     marco_baseline = (
-        df.loc[marco_mask & df["status"].eq("COMPLETE"), ["instance", "avg_diversity", "total_runtime"]]
+        df.loc[marco_mask & df["status"].eq("COMPLETE"), ["instance", "min_diversity", "total_runtime"]]
         .rename(
             columns={
-                "avg_diversity": "marco_avg_diversity",
+                "min_diversity": "marco_min_diversity",
                 "total_runtime": "marco_total_runtime",
             }
         )
@@ -112,8 +112,8 @@ def compare_to_marco_per_instance(summary_csv: Path, output_csv: Path) -> None:
     completed_non_marco = df["status"].eq("COMPLETE") & ~df["algorithm"].eq("marco")
 
     df.loc[completed_non_marco, "diversity_gain_vs_marco"] = (
-        df.loc[completed_non_marco, "avg_diversity"]
-        - df.loc[completed_non_marco, "marco_avg_diversity"]
+        df.loc[completed_non_marco, "min_diversity"]
+        - df.loc[completed_non_marco, "marco_min_diversity"]
     )
 
     df.loc[completed_non_marco, "additional_runtime_vs_marco"] = (
@@ -121,7 +121,7 @@ def compare_to_marco_per_instance(summary_csv: Path, output_csv: Path) -> None:
         - df.loc[completed_non_marco, "marco_total_runtime"]
     )
 
-    df = df.drop(columns=["marco_avg_diversity", "marco_total_runtime"])
+    df = df.drop(columns=["marco_min_diversity", "marco_total_runtime"])
 
     df.to_csv(output_csv, index=False)
 
@@ -150,7 +150,7 @@ def summarize_per_algorithm(compare_csv: Path, output_csv: Path) -> None:
     agg = (
         df_all_completed.groupby("algorithm")
         .agg(
-            avg_diversity_gain_vs_marco=("diversity_gain_vs_marco", "mean"),
+            mean_diversity_gain_vs_marco=("diversity_gain_vs_marco", "mean"),
             avg_additional_runtime_vs_marco=("additional_runtime_vs_marco", "mean"),
         )
     )
@@ -165,37 +165,37 @@ def compare_to_topk_per_instance(
 
     Output columns
     --------------
-    instance, algorithm, status, num_muses, total_runtime, avg_diversity,
+    instance, algorithm, status, num_muses, total_runtime, min_diversity,
     diversity_marco_topk, outperforms_topk
 
     ``outperforms_topk`` is True when status == "COMPLETE" **and**
-    avg_diversity > diversity_marco_topk.
+    min_diversity > diversity_marco_topk.
     """
     df = pd.read_csv(diversity_csv)
     topk_df = pd.read_csv(topk_csv)
 
     for name, src in [("diversity_csv", df), ("topk_csv", topk_df)]:
-        required = {"instance", "algorithm", "status", "num_muses", "total_runtime", "avg_diversity"}
+        required = {"instance", "algorithm", "status", "num_muses", "total_runtime", "min_diversity"}
         missing = required - set(src.columns)
         if missing:
             raise ValueError(f"Missing columns in {name}: {sorted(missing)}")
 
     marco_topk = topk_df[topk_df["algorithm"] == "marco_until_diverse"][
-        ["instance", "avg_diversity", "status"]
-    ].rename(columns={"avg_diversity": "diversity_marco_topk", "status": "marco_topk_status"})
+        ["instance", "min_diversity", "status"]
+    ].rename(columns={"min_diversity": "diversity_marco_topk", "status": "marco_topk_status"})
 
     df = df.merge(marco_topk, on="instance", how="left")
 
     marco_timed_out = df["marco_topk_status"].eq("TIMEOUT")
     df["outperforms_topk"] = df["status"].eq("COMPLETE") & (
-        marco_timed_out | (df["avg_diversity"] >= df["diversity_marco_topk"])
+        marco_timed_out | (df["min_diversity"] >= df["diversity_marco_topk"])
     )
 
     df = df.drop(columns=["marco_topk_status"])
 
     out_cols = [
         "instance", "algorithm", "status", "num_muses",
-        "total_runtime", "avg_diversity", "diversity_marco_topk", "outperforms_topk",
+        "total_runtime", "min_diversity", "diversity_marco_topk", "outperforms_topk",
     ]
     df[out_cols].sort_values(["instance", "algorithm"]).reset_index(drop=True).to_csv(
         output_csv, index=False, quoting=csv.QUOTE_MINIMAL
@@ -234,8 +234,8 @@ def summarize_completed(
 ) -> None:
     """For instances where every algorithm completed, summarise per algorithm:
 
-    - diversity_gain_vs_marco        : mean(avg_diversity - marco avg_diversity)
-    - diversity_gain_vs_marco_topk   : mean(avg_diversity - marco_until_diverse avg_diversity)
+    - diversity_gain_vs_marco        : mean(min_diversity - marco min_diversity)
+    - diversity_gain_vs_marco_topk   : mean(min_diversity - marco_until_diverse min_diversity)
     - additional_runtime_vs_marco    : mean(total_runtime  - marco total_runtime)
 
     All three metrics can be negative.
@@ -244,7 +244,7 @@ def summarize_completed(
     topk = pd.read_csv(compare_topk_csv)
 
     for name, df, required in [
-        ("completed_csv", completed, {"instance", "algorithm", "avg_diversity", "diversity_gain_vs_marco", "additional_runtime_vs_marco"}),
+        ("completed_csv", completed, {"instance", "algorithm", "min_diversity", "diversity_gain_vs_marco", "additional_runtime_vs_marco"}),
         ("compare_topk_csv", topk,   {"instance", "diversity_marco_topk"}),
     ]:
         missing = required - set(df.columns)
@@ -255,7 +255,7 @@ def summarize_completed(
     topk_baseline = topk[["instance", "diversity_marco_topk"]].drop_duplicates("instance")
 
     df = completed.merge(topk_baseline, on="instance", how="left")
-    df["diversity_gain_vs_marco_topk"] = df["avg_diversity"] - df["diversity_marco_topk"]
+    df["diversity_gain_vs_marco_topk"] = df["min_diversity"] - df["diversity_marco_topk"]
 
     result = (
         df[df["algorithm"] != "marco"]
