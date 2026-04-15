@@ -754,7 +754,7 @@ def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_min_div=0
     n = len(matrix)
 
     if k <= 0 or n <= 1:
-        return max_comb, max_min_div
+        return max_comb, float(max_min_div)
 
     if incremental_last:
         last = n - 1
@@ -774,4 +774,4 @@ def select_top_k(matrix, k, incremental_last=False, max_comb=None, max_min_div=0
                 max_min_div = curr_min
                 max_comb = comb
 
-    return max_comb, max_min_div
+    return max_comb, float(max_min_div)
