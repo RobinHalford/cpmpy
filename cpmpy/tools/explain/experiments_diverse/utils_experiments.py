@@ -219,6 +219,14 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
             write_results_to_csv(result, fieldnames, output_file)
 
 
+_XCSP_FIELDNAMES = [
+    "instance", "algorithm", "solver", "map_solver", "hs_solver",
+    "status", "runtimes", "error_message", "MUSes"
+]
+_XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
+    "status", "diversity_curve", "error_message"]
+
+
 def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
     """
         Run one XCSP instance for the given algorithm.
@@ -299,64 +307,40 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
 
 def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, time_limit, num_mus):
     """
-        Run one XCSP instance for marco until diverse. 
+        Run one XCSP instance for marco until diverse.
     """
-    fieldnames = ["instance", "algorithm", "solver", "map_solver", "status", "runtimes", "total_num_mus", "error_message", "MUSes"]
-
-    result = dict.fromkeys(fieldnames)  # initialize result dict with empty values
+    result = dict.fromkeys(_XCSP_FIELDNAMES_TOPK)  # initialize result dict with empty values
     result["instance"] = filename
     result["algorithm"] = "marco_until_diverse"
     result["solver"] = solver
     result["map_solver"] = map_solver
-    result["total_num_mus"] = 0
     result["error_message"] = None
     result["status"] = "STARTED"  # default unless proven otherwise
 
     model = None
-    generator = None
-    
-    runtimes = []
-    muses = []
-    total_num_mus = 0
-        
+    curve = []
+
     try:
         model = cp.Model().from_file(path)
-        constraint_to_idx = {id(c): i for i, c in enumerate(model.constraints)}
 
-        status, muses, runtimes, total_num_mus = marco_until_diverse(model.constraints, num_mus, time_limit=time_limit, solver=solver, map_solver=map_solver)
+        status, curve = marco_until_diverse(model.constraints, num_mus, time_limit=time_limit, solver=solver, map_solver=map_solver)
         if status == "COMPLETE":
             result["status"] = "COMPLETE"
         elif status == "TIMEOUT":
             result["status"] = "TIMEOUT"
         else:
-            raise ValueError(f"Unknown generator status: {status}")
-        if result["status"] == "STARTED":
-            # In case generator ends naturally before num_mus
-            result["status"] = "EXHAUSTED"  
+            raise ValueError(f"Unknown status: {status}")
     except Exception as e:
         result["status"] = "ERROR"
         result["error_message"] = f"{type(e).__name__}: {e}"
     finally:
-        muses = [[constraint_to_idx[id(c)] for c in subset] for subset in muses]
-        result["MUSes"] = muses
-        result["runtimes"] = runtimes
-        result["total_num_mus"] = total_num_mus
+        result["diversity_curve"] = curve
         # Explicit cleanup inside subprocess
-        del generator
         del model
-        del muses
-        del runtimes
+        del curve
         gc.collect()
-        
+
         queue.put(result)
-
-
-_XCSP_FIELDNAMES = [
-    "instance", "algorithm", "solver", "map_solver", "hs_solver",
-    "status", "runtimes", "error_message", "MUSes"
-]
-_XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
-    "status", "runtimes", "total_num_mus" ,"error_message", "MUSes"]
 
 
 def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
@@ -428,10 +412,8 @@ def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
         result["solver"] = solver
         result["map_solver"] = map_solver
         result["status"] = "ERROR"
-        result["total_num_mus"] = 0
         result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
-        result["runtimes"] = []
-        result["MUSes"] = []
+        result["diversity_curve"] = []
 
     queue.close()
     queue.join_thread()

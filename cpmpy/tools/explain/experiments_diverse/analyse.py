@@ -158,6 +158,49 @@ def summarize_per_algorithm(compare_csv: Path, output_csv: Path) -> None:
     result.to_csv(output_csv)
 
 
+def parse_diversity_curve(text: str) -> List[tuple]:
+    """Parse a diversity curve string like '[(0.1, 0.0), (0.5, 0.3)]' into a list of (timestamp, min_div) tuples."""
+    text = (text or "").strip()
+    if not text or text == "[]":
+        return []
+    return ast.literal_eval(text)
+
+
+def topk_diversity_per_instance(input_csv: Path, output_csv: Path) -> None:
+    """Summarise marco_until_diverse results from a diversity-curve CSV.
+
+    Reads the ``diversity_curve`` column (list of ``(timestamp, best_min_div)``
+    tuples) and derives the same output schema as ``diversity_per_instance``
+    so that ``compare_to_topk_per_instance`` can consume it unchanged.
+    """
+    df = pd.read_csv(input_csv)
+
+    required_columns = {"instance", "algorithm", "status", "diversity_curve"}
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    rows = []
+    for _, row in df.iterrows():
+        curve = parse_diversity_curve(str(row["diversity_curve"]))
+        total_runtime = curve[-1][0] if curve else 0.0
+        min_diversity = curve[-1][1] if curve else 0.0
+        rows.append(
+            {
+                "instance": row["instance"],
+                "algorithm": row["algorithm"],
+                "status": row["status"],
+                "num_muses": len(curve),
+                "total_runtime": total_runtime,
+                "min_diversity": min_diversity,
+            }
+        )
+
+    summary_df = pd.DataFrame(rows)
+    summary_df = summary_df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
+    summary_df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
+
+
 def compare_to_topk_per_instance(
     diversity_csv: Path, topk_csv: Path, output_csv: Path) -> None:
     """Compare every algorithm in *diversity_csv* against the
@@ -289,7 +332,7 @@ def main() -> None:
     args = parser.parse_args()
 
     diversity_per_instance(args.input_csv, args.output_dir/"diversity_per_instance.csv")
-    diversity_per_instance(args.output_dir/"xcsp_topk_20260412_141740.csv", args.output_dir/"topk_per_instance.csv")
+    topk_diversity_per_instance(args.output_dir/"xcsp_topk_20260412_141740.csv", args.output_dir/"topk_per_instance.csv")
     compare_to_topk_per_instance(args.output_dir/"diversity_per_instance.csv", args.output_dir/"topk_per_instance.csv", args.output_dir/"compare_to_topk_per_instance.csv")
     summarize_topk_comparison(args.output_dir/"compare_to_topk_per_instance.csv", args.output_dir/"summary_topk_comparison.csv")
     compare_to_marco_per_instance(args.output_dir/"diversity_per_instance.csv", args.output_dir/"compare_per_instance.csv")

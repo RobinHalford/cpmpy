@@ -59,8 +59,9 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     """
         Enumerate MUSes with marco until either an optimally diverse set of k MUSes
         is found (pairwise min diversity >= 1), or the time limit is exhausted.
-        Returns the status, most diverse subset of k MUSes found, the timestamps at which they were found
-        and the total amount of MUSes that were generated during the entire process.
+        Returns the status and the diversity curve: a list of (timestamp, best_min_diversity)
+        tuples, one per MUS found. best_min_diversity is the best min pairwise diversity
+        achievable with any k-subset of all MUSes found so far (0 if fewer than k MUSes found).
 
         :param constraints: soft constraints
         :param k: desired number of diverse MUSes
@@ -74,9 +75,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     deadline = start_time + time_limit - 2  # reserve 2 seconds for post-processing
 
     muses = []
-    top_muses = []
-    times = []
-    top_times = []
+    curve = []  # list of (timestamp, best_min_div) snapshots
     div_matrix = np.zeros((0, 0), dtype=float)
     top_indx = None
     min_div = 0
@@ -87,7 +86,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
             break  # uses remaining 2 seconds returning the results
         if label != "MUS":
             continue
-        times.append(time.monotonic() - start_time)
+        timestamp = time.monotonic() - start_time
 
         j = len(muses)  # 0-based index of this MUS before appending
         muses.append(mus)
@@ -104,24 +103,24 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         if j == k - 1:
             # First time we have exactly k MUSes: only one combination, full scan
             top_indx, min_div = select_top_k(div_matrix, k, incremental_last=False)
+            curve.append((timestamp, min_div))
             if min_div >= 1:
                 break
         elif j >= k:
             # Incrementally check only combinations that include the newest MUS
             top_indx, min_div = select_top_k(div_matrix, k, incremental_last=True,
                                               max_comb=top_indx, max_min_div=min_div)
+            curve.append((timestamp, min_div))
             if min_div >= 1:
                 break
+        else:
+            # Fewer than k MUSes found so far: diversity undefined, record 0
+            curve.append((timestamp, 0))
 
     if top_indx is None:
-        # Fewer than k MUSes found —> return all of them
-        top_muses = muses
-        top_times = times
-        return "TIMEOUT", top_muses, top_times, len(muses)
+        return "TIMEOUT", curve
     else:
-        top_muses = [muses[i] for i in top_indx]
-        top_times = [times[i] for i in top_indx]
-        return "COMPLETE", top_muses, top_times, len(muses)
+        return "COMPLETE", curve
 
 
 def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
