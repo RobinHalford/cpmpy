@@ -5,11 +5,13 @@ import ast
 import csv
 from pathlib import Path
 from typing import List, Sequence
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
 from cpmpy.tools.explain.utils import diversity_setOfMUSes, diversity_matrix
 from cpmpy.tools.explain.visualize_diversity import visualize_heatmap
+
 
 def parse_runtime_list(text: str) -> List[float]:
     """Parse a string like '[0.1, 0.3, 0.9]' into a list of floats."""
@@ -47,117 +49,6 @@ def total_runtime(runtimes: Sequence[float]) -> float:
     return runtimes[-1] if runtimes else 0.0
 
 
-def diversity_per_instance(input_csv: Path, output_csv: Path) -> None:
-    df = pd.read_csv(input_csv)
-
-    required_columns = {"instance", "algorithm", "status", "runtimes", "MUSes"}
-    missing = required_columns - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    rows = []
-    for _, row in df.iterrows():
-        muses = parse_mus_list(str(row["MUSes"]))
-        runtimes = parse_runtime_list(str(row["runtimes"]))
-
-        rows.append(
-            {
-                "instance": row["instance"],
-                "algorithm": row["algorithm"],
-                "status": row["status"],
-                "num_muses": len(muses),
-                "total_runtime": total_runtime(runtimes),
-                "min_diversity": diversity_setOfMUSes(muses) if len(muses) > 1 else 0,
-            }
-        )
-
-    summary_df = pd.DataFrame(rows)
-    summary_df = summary_df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
-
-    summary_df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
-
-
-def compare_to_marco_per_instance(summary_csv: Path, output_csv: Path) -> None:
-    df = pd.read_csv(summary_csv)
-
-    required_cols = {
-        "instance",
-        "algorithm",
-        "status",
-        "total_runtime",
-        "min_diversity",
-    }
-    missing = required_cols - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    # Start with NaN for everything
-    df["diversity_gain_vs_marco"] = np.nan
-    df["additional_runtime_vs_marco"] = np.nan
-
-    marco_mask = df["algorithm"].eq("marco")
-    df.loc[marco_mask, ["diversity_gain_vs_marco", "additional_runtime_vs_marco"]] = 0.0
-
-    marco_baseline = (
-        df.loc[marco_mask & df["status"].eq("COMPLETE"), ["instance", "min_diversity", "total_runtime"]]
-        .rename(
-            columns={
-                "min_diversity": "marco_min_diversity",
-                "total_runtime": "marco_total_runtime",
-            }
-        )
-    )
-
-    df = df.merge(marco_baseline, on="instance", how="left")
-    completed_non_marco = df["status"].eq("COMPLETE") & ~df["algorithm"].eq("marco")
-
-    df.loc[completed_non_marco, "diversity_gain_vs_marco"] = (
-        df.loc[completed_non_marco, "min_diversity"]
-        - df.loc[completed_non_marco, "marco_min_diversity"]
-    )
-
-    df.loc[completed_non_marco, "additional_runtime_vs_marco"] = (
-        df.loc[completed_non_marco, "total_runtime"]
-        - df.loc[completed_non_marco, "marco_total_runtime"]
-    )
-
-    df = df.drop(columns=["marco_min_diversity", "marco_total_runtime"])
-
-    df.to_csv(output_csv, index=False)
-
-
-def summarize_per_algorithm(compare_csv: Path, output_csv: Path) -> None:
-    df = pd.read_csv(compare_csv)
-
-    required_cols = {
-        "algorithm",
-        "status",
-        "diversity_gain_vs_marco",
-        "additional_runtime_vs_marco",
-    }
-    missing = required_cols - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-    
-    df = df[df["algorithm"] != "marco"].copy()
-    timeout_pct = (df.groupby("algorithm")["status"].apply(lambda s: 100 * s.eq("TIMEOUT").mean()).rename("timeout_pct"))
-
-    completed_instances = df.groupby("instance")["status"].apply(lambda s: s.eq("COMPLETE").all())
-
-    df_all_completed = df[df["instance"].isin(completed_instances[completed_instances].index)]
-    df_all_completed.to_csv(output_csv.parent / "completed_instances.csv", index=False)
-
-    agg = (
-        df_all_completed.groupby("algorithm")
-        .agg(
-            mean_diversity_gain_vs_marco=("diversity_gain_vs_marco", "mean"),
-            avg_additional_runtime_vs_marco=("additional_runtime_vs_marco", "mean"),
-        )
-    )
-    result = timeout_pct.to_frame().join(agg)
-    result.to_csv(output_csv)
-
-
 def parse_diversity_curve(text: str) -> List[tuple]:
     """Parse a diversity curve string like '[(0.1, 0.0), (0.5, 0.3)]' into a list of (timestamp, min_div) tuples."""
     text = (text or "").strip()
@@ -166,163 +57,139 @@ def parse_diversity_curve(text: str) -> List[tuple]:
     return ast.literal_eval(text)
 
 
-def topk_diversity_per_instance(input_csv: Path, output_csv: Path) -> None:
-    """Summarise marco_until_diverse results from a diversity-curve CSV.
+def filter_completed_xcsp(input_csv: Path, output_csv: Path) -> None:
+    """From the xcsp results file, keep only rows for instances where every
+    algorithm completed (status == 'COMPLETE').
 
-    Reads the ``diversity_curve`` column (list of ``(timestamp, best_min_div)``
-    tuples) and derives the same output schema as ``diversity_per_instance``
-    so that ``compare_to_topk_per_instance`` can consume it unchanged.
+    Adds a ``diversity_curve`` column — a list of (runtime, min_diversity) tuples,
+    one per MUS, where min_diversity at position i is the minimum pairwise
+    diversity over the first i+1 MUSes (0 for the first MUS).
+
+    The ``runtimes`` and ``MUSes`` columns are dropped from the output.
     """
     df = pd.read_csv(input_csv)
 
-    required_columns = {"instance", "algorithm", "status", "diversity_curve"}
-    missing = required_columns - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
+    # Keep only instances where every algorithm completed
+    completed = df.groupby("instance")["status"].apply(lambda s: (s == "COMPLETE").all())
+    completed_instances = completed[completed].index
+    df = df[df["instance"].isin(completed_instances)].copy()
 
-    rows = []
-    for _, row in df.iterrows():
-        curve = parse_diversity_curve(str(row["diversity_curve"]))
-        total_runtime = curve[-1][0] if curve else 0.0
-        min_diversity = curve[-1][1] if curve else 0.0
-        rows.append(
-            {
-                "instance": row["instance"],
-                "algorithm": row["algorithm"],
-                "status": row["status"],
-                "num_muses": len(curve),
-                "total_runtime": total_runtime,
-                "min_diversity": min_diversity,
-            }
-        )
-
-    summary_df = pd.DataFrame(rows)
-    summary_df = summary_df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
-    summary_df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
-
-
-def compare_to_topk_per_instance(
-    diversity_csv: Path, topk_csv: Path, output_csv: Path) -> None:
-    """Compare every algorithm in *diversity_csv* against the
-    ``marco_until_diverse`` baseline found in *topk_csv*.
-
-    Output columns
-    --------------
-    instance, algorithm, status, num_muses, total_runtime, min_diversity,
-    diversity_marco_topk, outperforms_topk
-
-    ``outperforms_topk`` is True when status == "COMPLETE" **and**
-    min_diversity > diversity_marco_topk.
-    """
-    df = pd.read_csv(diversity_csv)
-    topk_df = pd.read_csv(topk_csv)
-
-    for name, src in [("diversity_csv", df), ("topk_csv", topk_df)]:
-        required = {"instance", "algorithm", "status", "num_muses", "total_runtime", "min_diversity"}
-        missing = required - set(src.columns)
-        if missing:
-            raise ValueError(f"Missing columns in {name}: {sorted(missing)}")
-
-    marco_topk = topk_df[topk_df["algorithm"] == "marco_until_diverse"][
-        ["instance", "min_diversity", "status"]
-    ].rename(columns={"min_diversity": "diversity_marco_topk", "status": "marco_topk_status"})
-
-    df = df.merge(marco_topk, on="instance", how="left")
-
-    marco_timed_out = df["marco_topk_status"].eq("TIMEOUT")
-    df["outperforms_topk"] = df["status"].eq("COMPLETE") & (
-        marco_timed_out | (df["min_diversity"] >= df["diversity_marco_topk"])
-    )
-
-    df = df.drop(columns=["marco_topk_status"])
-
-    out_cols = [
-        "instance", "algorithm", "status", "num_muses",
-        "total_runtime", "min_diversity", "diversity_marco_topk", "outperforms_topk",
-    ]
-    df[out_cols].sort_values(["instance", "algorithm"]).reset_index(drop=True).to_csv(
-        output_csv, index=False, quoting=csv.QUOTE_MINIMAL
-    )
-
-
-def summarize_topk_comparison(compare_topk_csv: Path, output_csv: Path) -> None:
-    """Summarize how often each algorithm outperforms ``marco_until_diverse``.
-
-    Output columns
-    --------------
-    algorithm, num_instances, num_outperforms, pct_outperforms
-    """
-    df = pd.read_csv(compare_topk_csv)
-
-    required = {"algorithm", "instance", "outperforms_topk"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing columns: {sorted(missing)}")
-
-    result = (
-        df.groupby("algorithm")
-        .agg(
-            num_instances=("instance", "count"),
-            num_outperforms=("outperforms_topk", "sum"),
-        )
-        .assign(pct_outperforms=lambda d: 100 * d["num_outperforms"] / d["num_instances"])
-        .sort_values("pct_outperforms", ascending=False)
-    )
-
-    result.to_csv(output_csv, quoting=csv.QUOTE_MINIMAL)
-
-
-def summarize_completed(
-    completed_csv: Path, compare_topk_csv: Path, output_csv: Path
-) -> None:
-    """For instances where every algorithm completed, summarise per algorithm:
-
-    - diversity_gain_vs_marco        : mean(min_diversity - marco min_diversity)
-    - diversity_gain_vs_marco_topk   : mean(min_diversity - marco_until_diverse min_diversity)
-    - additional_runtime_vs_marco    : mean(total_runtime  - marco total_runtime)
-
-    All three metrics can be negative.
-    """
-    completed = pd.read_csv(completed_csv)
-    topk = pd.read_csv(compare_topk_csv)
-
-    for name, df, required in [
-        ("completed_csv", completed, {"instance", "algorithm", "min_diversity", "diversity_gain_vs_marco", "additional_runtime_vs_marco"}),
-        ("compare_topk_csv", topk,   {"instance", "diversity_marco_topk"}),
-    ]:
-        missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing columns in {name}: {sorted(missing)}")
-
-    # One diversity_marco_topk value per instance (same across all algorithms)
-    topk_baseline = topk[["instance", "diversity_marco_topk"]].drop_duplicates("instance")
-
-    df = completed.merge(topk_baseline, on="instance", how="left")
-    df["diversity_gain_vs_marco_topk"] = df["min_diversity"] - df["diversity_marco_topk"]
-
-    result = (
-        df[df["algorithm"] != "marco"]
-        .groupby("algorithm")
-        .agg(
-            diversity_gain_vs_marco=("diversity_gain_vs_marco", "mean"),
-            diversity_gain_vs_marco_topk=("diversity_gain_vs_marco_topk", "mean"),
-            additional_runtime_vs_marco=("additional_runtime_vs_marco", "mean"),
-        )
-        .sort_values("diversity_gain_vs_marco_topk", ascending=False)
-    )
-
-    result.to_csv(output_csv, quoting=csv.QUOTE_MINIMAL)
-
-
-def plots_1_instance(input_csv: Path) -> None:
-    df = pd.read_csv(input_csv)
-    div_matrices = []
-    for _, row in df.iterrows():
+    def _build_curve(row):
         muses = parse_mus_list(str(row["MUSes"]))
-        div_matrix = diversity_matrix(muses)
-        div_matrices.append(div_matrix)
-        print(f"Algorithm: {row['algorithm']}")
-        visualize_heatmap(div_matrix)
+        runtimes = parse_runtime_list(str(row["runtimes"]))
+        curve = []
+        for i, t in enumerate(runtimes):
+            if i == 0:
+                div = 0.0
+            else:
+                div = float(diversity_setOfMUSes(muses[:i + 1]))
+            curve.append((t, div))
+        return curve
+
+    df["diversity_curve"] = df.apply(_build_curve, axis=1)
+    df["min_diversity"] = df["diversity_curve"].apply(lambda c: c[-1][1] if c else 0.0)
+    df = df.drop(columns=["runtimes", "MUSes"])
+    df = df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
+    df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
+
+
+def filter_completed_xcsp_topk(input_csv: Path, output_csv: Path) -> None:
+    """From the xcsp_topk results file, keep only rows where the algorithm
+    completed (status == 'COMPLETE'), and add a min_diversity column.
+    """
+    df = pd.read_csv(input_csv)
+    df = df[df["status"] == "COMPLETE"].copy()
+
+    def _min_div(row):
+        curve = parse_diversity_curve(str(row["diversity_curve"]))
+        return curve[-1][1] if curve else 0.0
+
+    df["min_diversity"] = df.apply(_min_div, axis=1)
+    df = df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
+    df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
+
+
+_ALGO_DISPLAY = {
+    "marco":               "MARCO",
+    "marco_diverse_noMin": "D-MARCO v1",
+    "marco_diverse_min":   "D-MARCO v2",
+    "marco_diverse_opt":   "D-MARCO v3",
+    "ocus_enum1":          "D-OCUS v1",
+    "ocus_enum_shrink":    "D-OCUS v2",
+    "ocus_enum_opt":       "D-OCUS v3",
+    "marco_until_diverse": "MARCO top k",
+}
+
+_ALGO_COLORS = {
+    "marco":               "#f71919",
+    "marco_diverse_noMin": "#e78631",
+    "marco_diverse_min":   "#beb50f",
+    "marco_diverse_opt":   "#ff04c9",
+    "ocus_enum1":          "#55ae47",
+    "ocus_enum_shrink":    "#8a03a8",
+    "ocus_enum_opt":       "#10e892",
+    "marco_until_diverse": "#0b53c8",
+}
+
+
+def plot_anytime_curves(all_csv: Path, topk_csv: Path, output_dir: Path) -> None:
+    """Merge completed_all and completed_topk on common instances and produce
+    one anytime-diversity PNG per instance saved into output_dir.
+
+    The x-axis is log-scaled time; the y-axis is diversity fixed to [0, 1].
+    Each point in the diversity_curve is plotted as a marker and curves are
+    drawn as step functions (post-step) to reflect the anytime nature.
+    """
+    df_all  = pd.read_csv(all_csv)
+    df_topk = pd.read_csv(topk_csv)
+
+    common = set(df_all["instance"]) & set(df_topk["instance"])
+    df_all  = df_all[df_all["instance"].isin(common)]
+    df_topk = df_topk[df_topk["instance"].isin(common)]
+
+    combined = pd.concat([df_all, df_topk], ignore_index=True)
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for instance, group in combined.groupby("instance"):
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        plotted = {}  # algo -> (handle from scatter)
+        for _, row in group.iterrows():
+            algo = row["algorithm"]
+            curve = parse_diversity_curve(str(row["diversity_curve"]))
+            if not curve:
+                continue
+
+            times = [t for t, _ in curve]
+            divs  = [d for _, d in curve]
+            color = _ALGO_COLORS.get(algo, None)
+
+            ax.plot(times, divs, color=color, linewidth=1.0, alpha=0.4)
+            sc = ax.scatter(times, divs, color=color, s=40, zorder=5)
+            plotted[algo] = sc
+
+        ax.set_xscale("log")
+        ax.set_xlim(1e-2, 60)
+        ax.set_ylim(0, 1)
+        ax.set_xlabel("Time log(s)")
+        ax.set_ylabel("diversity of set of MUSes")
+
+        # Legend ordered by _ALGO_DISPLAY, only for algorithms that were plotted
+        ordered_handles = []
+        ordered_labels  = []
+        for algo, label in _ALGO_DISPLAY.items():
+            if algo in plotted:
+                ordered_handles.append(plotted[algo])
+                ordered_labels.append(label)
+        ax.legend(ordered_handles, ordered_labels, loc="upper left", fontsize=8)
+
+        ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.5)
+
+        safe_name = str(instance).replace("/", "_").replace("\\", "_")
+        fig.savefig(output_dir/"plots"/f"{safe_name}.png", dpi=300, bbox_inches="tight")
+        plt.close(fig)
 
 
 def main() -> None:
@@ -331,14 +198,11 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path, help="Path to the output directory")
     args = parser.parse_args()
 
-    diversity_per_instance(args.input_csv, args.output_dir/"diversity_per_instance.csv")
-    topk_diversity_per_instance(args.output_dir/"xcsp_topk_20260412_141740.csv", args.output_dir/"topk_per_instance.csv")
-    compare_to_topk_per_instance(args.output_dir/"diversity_per_instance.csv", args.output_dir/"topk_per_instance.csv", args.output_dir/"compare_to_topk_per_instance.csv")
-    summarize_topk_comparison(args.output_dir/"compare_to_topk_per_instance.csv", args.output_dir/"summary_topk_comparison.csv")
-    compare_to_marco_per_instance(args.output_dir/"diversity_per_instance.csv", args.output_dir/"compare_per_instance.csv")
-    summarize_per_algorithm(args.output_dir/"compare_per_instance.csv", args.output_dir/"summary_per_algorithm.csv")
-    summarize_completed(args.output_dir/"completed_instances.csv", args.output_dir/"compare_to_topk_per_instance.csv", args.output_dir/"summary_completed.csv")
-    # plots_1_instance(args.input_csv)
+    filter_completed_xcsp(args.input_csv,  args.output_dir/"completed_all.csv")
+    filter_completed_xcsp_topk(args.output_dir/"xcsp_topk_20260415_145106.csv", args.output_dir/"completed_topk.csv")
+
+    plot_anytime_curves(args.output_dir/"completed_all.csv", args.output_dir/"completed_topk.csv", args.output_dir)
+
 
 if __name__ == "__main__":
     main()

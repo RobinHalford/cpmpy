@@ -74,7 +74,9 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
     start_time = time.monotonic()
     deadline = start_time + time_limit - 2  # reserve 2 seconds for post-processing
 
-    muses = []
+    constraint_to_idx = {id(c): i for i, c in enumerate(constraints)}
+
+    muses = []  # stored as index lists
     curve = []  # list of (timestamp, best_min_div) snapshots
     div_matrix = np.zeros((0, 0), dtype=float)
     top_indx = None
@@ -88,8 +90,9 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
             continue
         timestamp = time.monotonic() - start_time
 
+        mus_idx = [constraint_to_idx[id(c)] for c in mus]
         j = len(muses)  # 0-based index of this MUS before appending
-        muses.append(mus)
+        muses.append(mus_idx)
 
         # Expand diversity matrix and fill in pairwise diversities with new MUS
         if j == 0:
@@ -97,7 +100,7 @@ def marco_until_diverse(constraints, k, time_limit, solver="exact", map_solver="
         else:
             div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)), mode="constant")
             for l in range(j):
-                div_matrix[l, j] = diversity_pair(muses[l], mus, measure="overlap")
+                div_matrix[l, j] = diversity_pair(muses[l], mus_idx, measure="overlap")
 
         # Once we have at least k MUSes, track the most diverse k-subset
         if j == k - 1:
