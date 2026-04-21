@@ -221,7 +221,7 @@ _XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
     "status", "diversity_curve", "error_message"]
 
 
-def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
+def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit):
     """
         Run one XCSP instance for the given algorithm.
     """
@@ -269,9 +269,6 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
             if status == "MUS":
                 muses.append([constraint_to_idx[id(c)] for c in subset])
                 runtimes.append(elapsed_time)
-                if len(muses) >= num_mus:
-                    result["status"] = "COMPLETE"
-                    break
             elif status == "MCS":
                 # this should never happen
                 raise ValueError(f"Received a MCS instead of MUS")
@@ -281,7 +278,7 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
             else:
                 raise ValueError(f"Unknown generator status: {status}")
         if result["status"] == "STARTED":
-            # In case generator ends naturally before num_mus
+            # In case generator ends naturally before TIMEOUT
             result["status"] = "EXHAUSTED"  
     except Exception as e:
         result["status"] = "ERROR"
@@ -295,7 +292,7 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         del muses
         del runtimes
         gc.collect()
-        
+        # put results
         queue.put(result)
 
 
@@ -337,14 +334,14 @@ def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, ti
         queue.put(result)
 
 
-def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus):
+def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit):
     """
         Create  a subprocess for one (filename, algorithm) pair and return the result dict.
     """
     queue = mp.Queue()
     proc = mp.Process(
         target=run_single_xcsp_instance,
-        args=(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus)
+        args=(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit)
     )
     proc.start()
     proc.join(timeout=time_limit + 60)
@@ -417,7 +414,7 @@ def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
     return result
 
 
-def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, output_file, max_workers=4):
+def execute_xcsp_instances(solver, map_solver, hs_solver, time_limit, output_file, max_workers=4):
     """
         Starts multi-threaded experiments on XCSP instances with all algorithms except marco until diverse.
     """
@@ -445,7 +442,7 @@ def execute_xcsp_instances(num_mus, solver, map_solver, hs_solver, time_limit, o
     def run_task(filename, algorithm):
         path = str(DATA_DIR / "XCSP_MUS" / filename)
         print(f"File {filename}, running algorithm: {algorithm}", flush=True)
-        result = _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit, num_mus)
+        result = _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit)
         write_results_to_csv(result, _XCSP_FIELDNAMES, output_file)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

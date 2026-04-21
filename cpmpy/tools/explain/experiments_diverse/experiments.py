@@ -85,7 +85,7 @@ def benchmark_NR(num_mus: int, solver: str,
 
 def benchmark_xcsp_MUS(num_mus: int, solver: str, 
                  map_solver: str, hs_solver: str,
-                 time_limit: int = 120,
+                 time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
     Benchmark diverse MUS enumeration on selection of XCSP instances from 
@@ -102,7 +102,7 @@ def benchmark_xcsp_MUS(num_mus: int, solver: str,
     # Define output file path with timestamp
     output_file = str(output_dir / f"xcsp_{timestamp}.csv")
     # execute experiments
-    execute_xcsp_instances(num_mus=num_mus,
+    execute_xcsp_instances(
                            solver=solver,
                            map_solver=map_solver,
                            hs_solver=hs_solver,
@@ -113,7 +113,7 @@ def benchmark_xcsp_MUS(num_mus: int, solver: str,
 
 def benchmark_xcsp_until_diverse(num_mus: int, solver: str, 
                  map_solver: str, hs_solver: str,
-                 time_limit: int = 120,
+                 time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
     Benchmark diverse MUS enumeration on selection of XCSP instances from 
@@ -152,5 +152,5 @@ if __name__ == "__main__":
 
     # use **vars(args) to pass all arguments to the benchmark functions
     # benchmark_NR(**vars(args))
-    # benchmark_xcsp_MUS(**vars(args))
-    benchmark_xcsp_until_diverse(**vars(args))
+    benchmark_xcsp_MUS(**vars(args))
+    # benchmark_xcsp_until_diverse(**vars(args))
