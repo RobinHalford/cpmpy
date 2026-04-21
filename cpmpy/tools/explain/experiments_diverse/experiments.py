@@ -11,7 +11,7 @@ Required Arguments
 --map-solver : str
     The name of the map-solver to benchmark (e.g., "ortools", "exact", "choco").
 
---hit-solver : str
+--hs-solver : str
     The name of the hitting set solver to benchmark (e.g., "ortools", "gurobi").
 
 
@@ -21,20 +21,11 @@ Optional Arguments
 --time-limit : int, default=60
     Time limit in seconds per instance.
 
---mem-limit : int, default=8192
-    Memory limit in megabytes per instance.
-
 --output-dir : str, default='results'
     Directory where result CSV files will be saved.
-
 """
-import sys
-import os
-import time
 from datetime import datetime
-import csv
 import cpmpy as cp
-import numpy as np
 import importlib
 importlib.reload(cp)
 import argparse
@@ -42,21 +33,31 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
-from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, enum_sat_competition_instances
+from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances, execute_solver_combinations, execute_xcsp_top_k
 
 
+def test_solver_combinations(time_limit: int, output_dir: str):
+    """
+    Test different combinations of solvers and map-solvers on a small set of instances to identify promising configurations for the full benchmarks.
 
-
-# sat competition experiments
-
-def load_sat_competition_instances():
-    enum_sat_competition_instances()
+    Args:
+        time_limit (int): Time limit in seconds.
+    """
+    # Create output directory if it doesn't exist
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Get current timestamp in a filename-safe format
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Define output file path with timestamp
+    output_file_NR = str(output_dir / f"solver_combinations_NR_{timestamp}.csv")
+    output_file_xcsp = str(output_dir / f"solver_combinations_xcsp_{timestamp}.csv")
+    execute_solver_combinations(time_limit=time_limit, output_file_NR=output_file_NR, output_file_xcsp=output_file_xcsp)
     return
     
 
 def benchmark_NR(num_mus: int, solver: str, 
-                 map_solver: str, hit_solver: str,
-                 time_limit: int = 60, mem_limit: int = 8192,
+                 map_solver: str, hs_solver: str,
+                 time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
     Benchmark diverse MUS enumeration on Nurse Rostering instances.
@@ -72,26 +73,84 @@ def benchmark_NR(num_mus: int, solver: str,
     # Define output file path with timestamp
     output_file = str(output_dir / f"diverse_NR_{timestamp}.csv")
     # execute experiments 
-    execute_unsat_nr_models(difficulty_factor=0.8)
+    execute_unsat_nr_models(num_mus=num_mus, 
+                            solver=solver, 
+                            map_solver=map_solver, 
+                            hs_solver=hs_solver,
+                            difficulty_factor=0.1,
+                            time_limit=time_limit,
+                            output_file=output_file)
+    return output_file
+    
+
+def benchmark_xcsp_MUS(num_mus: int, solver: str, 
+                 map_solver: str, hs_solver: str,
+                 time_limit: int = 120,
+                 output_dir: str = 'results') -> str:
+    """
+    Benchmark diverse MUS enumeration on selection of XCSP instances from 
+    https://www.xcsp.org/specifications/ (satisfiable instances were transformed to unsatisfiable instances).
+
+    Returns:
+        str: Path to the output CSV file.
+    """
+    # Create output directory if it doesn't exist
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Get current timestamp in a filename-safe format
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Define output file path with timestamp
+    output_file = str(output_dir / f"xcsp_{timestamp}.csv")
+    # execute experiments
+    execute_xcsp_instances(num_mus=num_mus,
+                           solver=solver,
+                           map_solver=map_solver,
+                           hs_solver=hs_solver,
+                           time_limit=time_limit,
+                           output_file=output_file)
+    return output_file
+
+
+def benchmark_xcsp_until_diverse(num_mus: int, solver: str, 
+                 map_solver: str, hs_solver: str,
+                 time_limit: int = 120,
+                 output_dir: str = 'results') -> str:
+    """
+    Benchmark diverse MUS enumeration on selection of XCSP instances from 
+    https://www.xcsp.org/specifications/ (satisfiable instances were transformed to unsatisfiable instances).
+
+    Returns:
+        str: Path to the output CSV file.
+    """
+    # Create output directory if it doesn't exist
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Get current timestamp in a filename-safe format
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Define output file path with timestamp
+    output_file = str(output_dir / f"xcsp_topk_{timestamp}.csv")
+    # execute experiments
+    execute_xcsp_top_k(num_mus=num_mus,
+                           solver=solver,
+                           map_solver=map_solver,
+                           time_limit=time_limit,
+                           output_file=output_file)
+    return output_file
+
+
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Benchmark diverse MUS enumeration given the solver and map-solver to use.")
+    parser = argparse.ArgumentParser(description="Benchmark diverse MUS enumeration given the solvers to use.")
     parser.add_argument('--num-mus', type=int, required=True, help="The number of diverse MUSes to enumerate for each instance.")
-    parser.add_argument('--solver', type=str, required=True, help="The solver to use.")
+    parser.add_argument('--solver', type=str, required=True, help="The SAT solver to use.")
     parser.add_argument('--map-solver', type=str, required=True, help="The map-solver to use.")
-    parser.add_argument('--hit-solver', type=str, required=True, help="The hitting set solver to use.")
+    parser.add_argument('--hs-solver', type=str, required=True, help="The hitting set solver to use.")
     parser.add_argument('--time-limit', type=int, default=60, help="Time limit in seconds per instance.")
-    parser.add_argument('--mem-limit', type=int, default=8192, help="Memory limit in MB per instance.")
     parser.add_argument('--output-dir', type=str, default='results', help="Directory where result CSV files will be saved.")
     args = parser.parse_args()
 
     # use **vars(args) to pass all arguments to the benchmark functions
-    benchmark_NR(**vars(args))
-    # benchmark_sat_competition(**vars(args))
+    # benchmark_NR(**vars(args))
     # benchmark_xcsp_MUS(**vars(args))
-
-
-
-    # experiments_NR()
-    # load_sat_competition_instances()
+    benchmark_xcsp_until_diverse(**vars(args))

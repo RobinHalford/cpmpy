@@ -34,7 +34,7 @@ def visualize_upset(sets, label="MUS"):
     plt.show()
 
 
-def visualize_heatmap(diversity_matrix, colormap="YlOrRd"):
+def visualize_heatmap(diversity_matrix, colormap="YlOrRd", title=None):
     """
         Visualize the diversity between all the pairs of sets by creating a heatmap of the diversity matrix.
 
@@ -43,4 +43,8 @@ def visualize_heatmap(diversity_matrix, colormap="YlOrRd"):
     """
     with sns.axes_style("white"):
         sns.heatmap(diversity_matrix, vmax=1, square=True, cmap=colormap)
+        plt.xlabel("MUS number (order of generation)")
+        plt.ylabel("MUS number (order of generation)")
+        if title:
+            plt.title(title)
         plt.show()
