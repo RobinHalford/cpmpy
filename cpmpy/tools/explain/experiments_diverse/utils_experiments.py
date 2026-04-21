@@ -286,8 +286,8 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         result["error_message"] = f"{type(e).__name__}: {e}"
     finally:
         result["num_mus"] = len(muses)
-        result["MUSes"] = muses
-        result["runtimes"] = runtimes
+        result["MUSes"] = muses[:10]
+        result["runtimes"] = runtimes[:10]
         # Explicit cleanup inside subprocess
         del generator
         del model
