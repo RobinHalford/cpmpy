@@ -155,19 +155,33 @@ def plot_anytime_curves(all_csv: Path, topk_csv: Path, output_dir: Path) -> None
     for instance, group in combined.groupby("instance"):
         fig, ax = plt.subplots(figsize=(8, 5))
 
-        plotted = {}  # algo -> (handle from scatter)
+        plotted = {}  # algo -> scatter handle for legend
+
+        # Draw marco_until_diverse first so it sits in the background
         for _, row in group.iterrows():
-            algo = row["algorithm"]
+            if row["algorithm"] != "marco_until_diverse":
+                continue
             curve = parse_diversity_curve(str(row["diversity_curve"]))
             if not curve:
                 continue
-
             times = [t for t, _ in curve]
             divs  = [d for _, d in curve]
-            color = _ALGO_COLORS.get(algo, None)
+            color = _ALGO_COLORS["marco_until_diverse"]
+            ax.plot(times, divs, color=color, linewidth=1.0, alpha=0.4, zorder=1)
+            sc = ax.scatter(times, divs, color=color, s=40, zorder=2)
+            plotted["marco_until_diverse"] = sc
 
-            ax.plot(times, divs, color=color, linewidth=1.0, alpha=0.4)
-            sc = ax.scatter(times, divs, color=color, s=40, zorder=5)
+        # Draw all other algorithms on top — last point only
+        for _, row in group.iterrows():
+            algo = row["algorithm"]
+            if algo == "marco_until_diverse":
+                continue
+            curve = parse_diversity_curve(str(row["diversity_curve"]))
+            if not curve:
+                continue
+            t, d = curve[-1]
+            color = _ALGO_COLORS.get(algo, None)
+            sc = ax.scatter([t], [d], color=color, s=60, zorder=3)
             plotted[algo] = sc
 
         ax.set_xscale("log")
@@ -183,7 +197,7 @@ def plot_anytime_curves(all_csv: Path, topk_csv: Path, output_dir: Path) -> None
             if algo in plotted:
                 ordered_handles.append(plotted[algo])
                 ordered_labels.append(label)
-        ax.legend(ordered_handles, ordered_labels, loc="upper left", fontsize=8)
+        ax.legend(ordered_handles, ordered_labels, loc="lower right", fontsize=8)
 
         ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.5)
 
@@ -199,7 +213,7 @@ def main() -> None:
     args = parser.parse_args()
 
     filter_completed_xcsp(args.input_csv,  args.output_dir/"completed_all.csv")
-    filter_completed_xcsp_topk(args.output_dir/"xcsp_topk_20260415_145106.csv", args.output_dir/"completed_topk.csv")
+    filter_completed_xcsp_topk(args.output_dir/"xcsp_topk_20260416_165301.csv", args.output_dir/"completed_topk.csv")
 
     plot_anytime_curves(args.output_dir/"completed_all.csv", args.output_dir/"completed_topk.csv", args.output_dir)
 

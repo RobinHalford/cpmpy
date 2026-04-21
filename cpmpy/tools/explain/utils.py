@@ -73,6 +73,8 @@ def diversity_pair(set1, set2, measure="overlap"):
         Compute the diversity between two sets of constraints (can be MUS, MCS, MSS, ...).
         Diversity is always between 0 and 1.
 
+        USE INTEGERS (for example id mapping) INSTEAD OF PLAIN SET OF CONSTRAINTS TO AVOID REPRESENTATION COLLISION
+
         :param: set1: the first set
         :param: set2: the second set
         :param: measure: name of a diversity measure ("Jaccard", "overlap", "set difference")

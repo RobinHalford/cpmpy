@@ -172,8 +172,6 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
                 muses = []
                 if algorithm == "marco":
                     generator = enumerate(timed_marco(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
-                elif algorithm == "marco_select_top_k":
-                    ... # TODO (not enumaration function)
                 elif algorithm == "marco_diverse_min":
                     generator = enumerate(marco_diverse_Min(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
                 elif algorithm == "marco_diverse_no_min":
