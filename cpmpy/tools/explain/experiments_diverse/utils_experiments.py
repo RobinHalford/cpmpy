@@ -214,7 +214,7 @@ def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_f
 
 
 _XCSP_FIELDNAMES = [
-    "instance", "algorithm", "solver", "map_solver", "hs_solver",
+    "instance", "algorithm", "solver", "map_solver", "hs_solver", "num_mus",
     "status", "runtimes", "error_message", "MUSes"
 ]
 _XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
@@ -233,6 +233,7 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
     result["solver"] = solver
     result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
     result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
+    result["num_mus"] = 0
     result["error_message"] = None
     result["status"] = "STARTED"  # default unless proven otherwise
 
@@ -279,11 +280,12 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
                 raise ValueError(f"Unknown generator status: {status}")
         if result["status"] == "STARTED":
             # In case generator ends naturally before TIMEOUT
-            result["status"] = "EXHAUSTED"  
+            result["status"] = "EXHAUSTED"
     except Exception as e:
         result["status"] = "ERROR"
         result["error_message"] = f"{type(e).__name__}: {e}"
     finally:
+        result["num_mus"] = len(muses)
         result["MUSes"] = muses
         result["runtimes"] = runtimes
         # Explicit cleanup inside subprocess
@@ -362,6 +364,7 @@ def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, tim
         result["solver"] = solver
         result["map_solver"] = map_solver if algorithm not in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
         result["hs_solver"] = hs_solver if algorithm in ["ocus_enum1", "ocus_enum_shrink", "ocus_enum_opt"] else None
+        result["num_mus"] = 0
         result["status"] = "ERROR"
         result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
         result["runtimes"] = []
