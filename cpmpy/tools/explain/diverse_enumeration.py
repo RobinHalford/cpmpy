@@ -222,6 +222,9 @@ def marco_diverse_Min(soft, hard=[], solver="exact", map_solver="exact", return_
             if return_mus:
                 yield "MUS", [dmap[a] for a in core], time.monotonic() - start_time
         
+        # ensure solution hint is still active
+        if do_solution_hint:
+            map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
         # Minimize over already seen constraints for next seed calculation
         map_solver.minimize(cp.sum([seenmap[a] for a in assump]*assump)) 
 
@@ -326,8 +329,7 @@ def marco_diverse_noMin(soft, hard=[], solver="exact", map_solver="exact", retur
             if return_mus:
                 yield "MUS", [dmap[a] for a in core], time.monotonic() - start_time
         
-        # update solution hint
-        map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
+        map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
 
 
 def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", return_mus=True, return_mcs=False, do_solution_hint=True, time_limit=None):
@@ -434,9 +436,9 @@ def marco_diverse_optimal(soft, hard=[], solver="exact", map_solver="exact", ret
 
             one_hot_MUS = np.array([a in core for a in assump], dtype=bool)
             prev_MUSes_assump.append(one_hot_MUS)
-        # update solution hint is still active
+        # ensure solution hint is still active
         if do_solution_hint:
-            map_solver.solution_hint(assump, [0 if seenmap[a] > 0 else 1 for a in assump])
+            map_solver.solution_hint(assump, [1]*len(assump)) # we want large subsets, more likely to be a MUS
         
         # minimize the max overlap (= maximize min diversity) over all pairs with previous MUSes
         overlaps = [overlap_CP_EXPR(assump, prev) for prev in prev_MUSes_assump]
