@@ -84,30 +84,28 @@ def benchmark_xcsp_MUS(num_mus: int, solver: str,
     return output_file
 
 
-def benchmark_xcsp_until_diverse(num_mus: int, solver: str, 
-                 map_solver: str, hs_solver: str,
+
+def benchmark_xcsp_marco_select_top_k(num_mus: int, solver: str,
+                 map_solver: str,
                  time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
-    Benchmark diverse MUS enumeration on selection of XCSP instances from 
-    https://www.xcsp.org/specifications/ (satisfiable instances were transformed to unsatisfiable instances).
+    Benchmark marco select-top-k on XCSP instances.
+    Runs timed_marco for (time_limit - 2) seconds per instance to generate up to n MUSes,
+    then selects the top-k subset by min pairwise diversity using select_top_k.
 
     Returns:
         str: Path to the output CSV file.
     """
-    # Create output directory if it doesn't exist
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Get current timestamp in a filename-safe format
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Define output file path with timestamp
-    output_file = str(output_dir / f"xcsp_topk_{timestamp}.csv")
-    # execute experiments
+    output_file = str(output_dir / f"xcsp_marco_select_top_k_{timestamp}.csv")
     execute_xcsp_top_k(num_mus=num_mus,
-                           solver=solver,
-                           map_solver=map_solver,
-                           time_limit=time_limit,
-                           output_file=output_file)
+                       solver=solver,
+                       map_solver=map_solver,
+                       time_limit=time_limit,
+                       output_file=output_file)
     return output_file
 
 
@@ -125,5 +123,6 @@ if __name__ == "__main__":
 
     # use **vars(args) to pass all arguments to the benchmark functions
     # benchmark_NR(**vars(args))
-    benchmark_xcsp_MUS(**vars(args))
+    # benchmark_xcsp_MUS(**vars(args))
     # benchmark_xcsp_until_diverse(**vars(args))
+    benchmark_xcsp_marco_select_top_k(num_mus=2, solver="exact", map_solver="exact", time_limit=60, output_dir="results")

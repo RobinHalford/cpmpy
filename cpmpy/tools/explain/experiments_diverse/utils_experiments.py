@@ -11,11 +11,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from filelock import FileLock
 import gc
 import multiprocessing as mp
+import numpy as np
 import pandas as pd
 import time
 from cpmpy.tools.explain.mus import smus
 from cpmpy.tools.explain.marco import timed_marco
-from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_shrink, marco_diverse_solhint, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
+from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_shrink, marco_diverse_solhint, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS, select_top_k
+from cpmpy.tools.explain.utils import diversity_pair
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
 
@@ -144,7 +146,8 @@ _XCSP_FIELDNAMES = [
     "status", "runtimes", "error_message", "MUSes"
 ]
 _XCSP_FIELDNAMES_TOPK = ["instance", "algorithm", "solver", "map_solver",
-    "status", "diversity_curve", "error_message"]
+    "k", "n", "diversity", "status", "error_message"]
+_XCSP_FIELDNAMES_MARCO_TOPK = ["instance", "solver", "map_solver", "k", "n", "diversity", "runtime", "status", "error_message"]
 
 
 def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solver, hs_solver, time_limit):
@@ -226,43 +229,6 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
         queue.put(result)
 
 
-def run_single_xcsp_instance_top_k(queue, path, filename, solver, map_solver, time_limit, num_mus):
-    """
-        Run one XCSP instance for marco until diverse.
-    """
-    result = dict.fromkeys(_XCSP_FIELDNAMES_TOPK)  # initialize result dict with empty values
-    result["instance"] = filename
-    result["algorithm"] = "marco_until_diverse"
-    result["solver"] = solver
-    result["map_solver"] = map_solver
-    result["error_message"] = None
-    result["status"] = "STARTED"  # default unless proven otherwise
-
-    model = None
-    curve = []
-
-    try:
-        model = cp.Model().from_file(path)
-
-        status, curve = marco_until_diverse(model.constraints, num_mus, time_limit=time_limit, solver=solver, map_solver=map_solver)
-        if status == "COMPLETE":
-            result["status"] = "COMPLETE"
-        elif status == "TIMEOUT":
-            result["status"] = "TIMEOUT"
-        else:
-            raise ValueError(f"Unknown status: {status}")
-    except Exception as e:
-        result["status"] = "ERROR"
-        result["error_message"] = f"{type(e).__name__}: {e}"
-    finally:
-        result["diversity_curve"] = curve
-        # Explicit cleanup inside subprocess
-        del model
-        del curve
-        gc.collect()
-
-        queue.put(result)
-
 
 def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, time_limit):
     """
@@ -305,44 +271,6 @@ def _run_xcsp_task(path, filename, algorithm, solver, map_solver, hs_solver, tim
     gc.collect()
     return result
 
-
-def _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus):
-    """
-        Create a subprocess for one instance and return the result dict.
-    """
-    queue = mp.Queue()
-    proc = mp.Process(
-        target=run_single_xcsp_instance_top_k,
-        args=(queue, path, filename, solver, map_solver, time_limit, num_mus)
-    )
-    proc.start()
-    proc.join(timeout=time_limit + 60)
-
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(timeout=10)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
-
-    if not queue.empty():
-        result = queue.get()
-    else:
-        result = dict.fromkeys(_XCSP_FIELDNAMES_TOPK)
-        result["instance"] = filename
-        result["algorithm"] = "marco_until_diverse"
-        result["solver"] = solver
-        result["map_solver"] = map_solver
-        result["status"] = "ERROR"
-        result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
-        result["diversity_curve"] = []
-
-    queue.close()
-    queue.join_thread()
-    del queue
-    del proc
-    gc.collect()
-    return result
 
 
 def execute_xcsp_instances(solver, map_solver, hs_solver, time_limit, output_file, max_workers=4):
@@ -387,23 +315,139 @@ def execute_xcsp_instances(solver, map_solver, hs_solver, time_limit, output_fil
                 print(f"Task ({fn}, {alg}) raised unexpected exception: {e}", flush=True)
 
 
+def run_single_xcsp_marco_top_k(queue, path, filename, k, solver, map_solver, time_limit):
+    """
+    Subprocess worker: run timed_marco for (time_limit - 2) seconds on one XCSP instance,
+    collect all MUSes, then select the top-k subset by min pairwise diversity.
+    """
+    result = dict.fromkeys(_XCSP_FIELDNAMES_MARCO_TOPK)
+    result["instance"] = filename
+    result["solver"] = solver
+    result["map_solver"] = map_solver
+    result["k"] = k
+    result["n"] = 0
+    result["diversity"] = None
+    result["runtime"] = None
+    result["error_message"] = None
+    result["status"] = "STARTED"
+
+    model = None
+    generator = None
+    muses = []
+    div_matrix = np.zeros((0, 0), dtype=float)
+
+    try:
+        start_time = time.monotonic()
+        model = cp.Model().from_file(path)
+        constraint_to_idx = {id(c): i for i, c in enumerate(model.constraints)}
+
+        generator = timed_marco(
+            model.constraints,
+            solver=solver,
+            map_solver=map_solver,
+            return_mcs=False,
+            time_limit=time_limit - 2,
+        )
+
+        for label, subset, _ in generator:
+            if label == "TIMEOUT":
+                result["status"] = "TIMEOUT"
+                break
+            if label != "MUS":
+                continue
+            mus_idx = [constraint_to_idx[id(c)] for c in subset]
+            j = len(muses)
+            muses.append(mus_idx)
+            if j == 0:
+                div_matrix = np.zeros((1, 1), dtype=float)
+            else:
+                div_matrix = np.pad(div_matrix, ((0, 1), (0, 1)), mode="constant")
+                for l in range(j):
+                    div_matrix[l, j] = diversity_pair(muses[l], mus_idx, measure="overlap")
+
+        if result["status"] == "STARTED":
+            result["status"] = "EXHAUSTED"
+
+        result["n"] = len(muses)
+        if len(muses) >= k:
+            _, min_div = select_top_k(div_matrix, k)
+            result["diversity"] = min_div
+        else:
+            result["diversity"] = 0.0
+
+        result["runtime"] = time.monotonic() - start_time
+
+    except Exception as e:
+        result["status"] = "ERROR"
+        result["error_message"] = f"{type(e).__name__}: {e}"
+    finally:
+        del generator
+        del model
+        del muses
+        gc.collect()
+        queue.put(result)
+
+
+def _run_xcsp_marco_top_k_task(path, filename, k, solver, map_solver, time_limit):
+    """Spawn a subprocess for one XCSP instance and return the result dict."""
+    queue = mp.Queue()
+    proc = mp.Process(
+        target=run_single_xcsp_marco_top_k,
+        args=(queue, path, filename, k, solver, map_solver, time_limit)
+    )
+    proc.start()
+    proc.join(timeout=time_limit + 60)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=10)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+
+    if not queue.empty():
+        result = queue.get()
+    else:
+        result = dict.fromkeys(_XCSP_FIELDNAMES_MARCO_TOPK)
+        result["instance"] = filename
+        result["solver"] = solver
+        result["map_solver"] = map_solver
+        result["k"] = k
+        result["n"] = 0
+        result["diversity"] = None
+        result["runtime"] = None
+        result["status"] = "ERROR"
+        result["error_message"] = f"Subprocess exited with code {proc.exitcode}"
+
+    queue.close()
+    queue.join_thread()
+    del queue
+    del proc
+    gc.collect()
+    return result
+
+
 def execute_xcsp_top_k(num_mus, solver, map_solver, time_limit, output_file, max_workers=4):
     """
-        Starts multi-threaded experiments on XCSP instances for MARCO until diverse (top k).
+    Benchmark marco select-top-k on XCSP instances.
+    Runs timed_marco for (time_limit - 2) seconds per instance,
+    then selects the top-k diverse MUSes using select_top_k.
     """
     filenames = pd.read_csv(
         DATA_DIR / "constraints_stats.csv",
         usecols=["filename"]
     )["filename"].tolist()
-    tasks = [filename for filename in filenames]
+
+    k = num_mus
+
     def run_task(filename):
         path = str(DATA_DIR / "XCSP_MUS" / filename)
-        print(f"File {filename}, running marco until diverse", flush=True)
-        result = _run_xcsp_top_k(path, filename, solver, map_solver, time_limit, num_mus)
-        write_results_to_csv(result, _XCSP_FIELDNAMES_TOPK, output_file)
+        print(f"File {filename}, running marco_select_top_k (k={k})", flush=True)
+        result = _run_xcsp_marco_top_k_task(path, filename, k, solver, map_solver, time_limit)
+        write_results_to_csv(result, _XCSP_FIELDNAMES_MARCO_TOPK, output_file)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(run_task, fn): fn for fn in tasks}
+        futures = {executor.submit(run_task, fn): fn for fn in filenames}
         for future in as_completed(futures):
             fn = futures[future]
             try:
