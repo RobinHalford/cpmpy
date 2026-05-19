@@ -15,7 +15,7 @@ import pandas as pd
 import time
 from cpmpy.tools.explain.mus import smus
 from cpmpy.tools.explain.marco import timed_marco
-from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_noMin, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
+from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_shrink, marco_diverse_solhint, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
 
@@ -139,80 +139,6 @@ def execute_solver_combination_instance(instance, model, time_limit: int, output
                     write_results_to_csv(result, fieldnames, output_file)
 
 
-def execute_unsat_nr_models(num_mus, solver, map_solver, hs_solver, difficulty_factor, time_limit, output_file):
-    dataset = NurseRosteringDataset(root=".", download=True, transform=parse_scheduling_period)
-    fieldnames = ["instance", "algorithm", "solver", "map_solver", "hs_solver", "status", "runtimes", "error_message", "MUSes"]
-    for i in range(0,1):
-        data, metadata = dataset[i]
-        # run all algorithms
-        for algorithm in ["marco", # "marco_select_top_k", "marco_until_diverse", "ocus_enum",
-                          "marco_diverse_no_min",
-                          "marco_diverse_min"]:
-            result = dict.fromkeys(fieldnames)   # initialize result dict with empty values   
-            result["instance"] = metadata["name"]
-            model, _ = nurserostering_model(**data)
-            print("created sat model")
-            optimal = get_optimal(model, time_limit=time_limit, solver=solver)
-            print(f"found optimal value: {optimal}")
-            model = create_unsat_model(model, optimal, difficulty_factor)
-            print("created unsat model")
-            assert model.solve(time_limit=60, solver="ortools") is False
-            print("asserted model is unsat")
-            try:
-                result["algorithm"] = algorithm
-                result["solver"] = solver
-                if algorithm != "ocus_enum":
-                    result["map_solver"] = map_solver
-                    result["hs_solver"] = None
-                else:
-                    result["hs_solver"] = hs_solver
-                    result["map_solver"] = None
-                start_total = time.time()
-                runtimes = []
-                muses = []
-                if algorithm == "marco":
-                    generator = enumerate(timed_marco(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
-                elif algorithm == "marco_diverse_min":
-                    generator = enumerate(marco_diverse_Min(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
-                elif algorithm == "marco_diverse_no_min":
-                    generator = enumerate(marco_diverse_noMin(model.constraints, solver=solver, map_solver=map_solver, return_mcs=False, time_limit=time_limit))
-                elif algorithm == "ocus_enum":
-                    # generator = enumerate(ocus_enum(model.constraints, solver=solver, hs_solver=hs_solver))
-                    ... # TODO 
-                else:
-                    raise ValueError(f"Unknown algorithm: {algorithm}")
-                
-                while True:
-                    step_start = time.time()
-                    try:
-                        j, (_, subset) = next(generator)
-                    except StopIteration:
-                        break
-                    muses.append(subset)
-                    runtimes.append(time.time() - start_total)
-                    # timeout check 
-                    if time.time() - step_start > time_limit:
-                        result["status"] = "TIMEOUT"
-                        break
-                    if j == num_mus - 1:
-                        result["status"] = "COMPLETE"
-                        break
-                result["MUSes"] = muses
-                result["runtimes"] = runtimes
-            except Exception as e:
-                result["algorithm"] = algorithm
-                result["solver"] = solver
-                if algorithm != "ocus_enum":
-                    result["map_solver"] = map_solver
-                    result["hs_solver"] = None
-                else:
-                    result["hs_solver"] = hs_solver
-                    result["map_solver"] = None
-                result["status"] = "error"
-                result["error_message"] = str(e)
-            write_results_to_csv(result, fieldnames, output_file)
-
-
 _XCSP_FIELDNAMES = [
     "instance", "algorithm", "solver", "map_solver", "hs_solver", "num_mus",
     "status", "runtimes", "error_message", "MUSes"
@@ -251,8 +177,10 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
             generator = timed_marco(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         # elif algorithm == "marco_select_top_k":
             #
-        elif algorithm == "marco_diverse_noMin":
-            generator = marco_diverse_noMin(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        elif algorithm == "marco_diverse_shrink":
+            generator = marco_diverse_shrink(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
+        elif algorithm == "marco_diverse_solhint":
+            generator = marco_diverse_solhint(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_min":
             generator = marco_diverse_Min(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_opt":
@@ -428,7 +356,8 @@ def execute_xcsp_instances(solver, map_solver, hs_solver, time_limit, output_fil
 
     algorithms = [
         "marco",
-        "marco_diverse_noMin",
+        "marco_diverse_shrink",
+        "marco_diverse_solhint",
         "marco_diverse_min",
         "marco_diverse_opt",
         "ocus_enum1",
