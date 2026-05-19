@@ -33,7 +33,7 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
-from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances, execute_solver_combinations, execute_xcsp_top_k
+from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_xcsp_instances, execute_solver_combinations, execute_xcsp_top_k
 
 
 def test_solver_combinations(time_limit: int, output_dir: str):
@@ -54,33 +54,6 @@ def test_solver_combinations(time_limit: int, output_dir: str):
     execute_solver_combinations(time_limit=time_limit, output_file_NR=output_file_NR, output_file_xcsp=output_file_xcsp)
     return
     
-
-def benchmark_NR(num_mus: int, solver: str, 
-                 map_solver: str, hs_solver: str,
-                 time_limit: int = 60,
-                 output_dir: str = 'results') -> str:
-    """
-    Benchmark diverse MUS enumeration on Nurse Rostering instances.
-
-    Returns:
-        str: Path to the output CSV file.
-    """
-    # Create output directory if it doesn't exist
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    # Get current timestamp in a filename-safe format
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Define output file path with timestamp
-    output_file = str(output_dir / f"diverse_NR_{timestamp}.csv")
-    # execute experiments 
-    execute_unsat_nr_models(num_mus=num_mus, 
-                            solver=solver, 
-                            map_solver=map_solver, 
-                            hs_solver=hs_solver,
-                            difficulty_factor=0.1,
-                            time_limit=time_limit,
-                            output_file=output_file)
-    return output_file
     
 
 def benchmark_xcsp_MUS(num_mus: int, solver: str, 
