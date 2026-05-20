@@ -71,7 +71,7 @@ class OCUSException(Exception):
 def diversity_pair(set1, set2, measure="overlap"):
     """
         Compute the diversity between two sets of constraints (can be MUS, MCS, MSS, ...).
-        Diversity is always between 0 and 1.
+        Diversity is always between 0 and 1, except for with set difference.
 
         USE INTEGERS (for example id mapping) INSTEAD OF PLAIN SET OF CONSTRAINTS TO AVOID REPRESENTATION COLLISION
 
@@ -100,6 +100,11 @@ def diversity_pair(set1, set2, measure="overlap"):
         # overlap(A, B) = |A ∩ B| / min(|A|,|B|)
         overlap = common / min(s1, s2)
         score = 1 - overlap
+        return score
+    
+    elif measure in ("set difference"):
+        union = s1 + s2 - common
+        score = union - common
         return score
     
     else:

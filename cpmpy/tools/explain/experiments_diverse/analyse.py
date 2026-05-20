@@ -57,153 +57,291 @@ def parse_diversity_curve(text: str) -> List[tuple]:
     return ast.literal_eval(text)
 
 
-def filter_completed_xcsp(input_csv: Path, output_csv: Path) -> None:
-    """From the xcsp results file, keep only rows for instances where every
-    algorithm completed (status == 'COMPLETE').
-
-    Adds a ``diversity_curve`` column — a list of (runtime, min_diversity) tuples,
-    one per MUS, where min_diversity at position i is the minimum pairwise
-    diversity over the first i+1 MUSes (0 for the first MUS).
-
-    The ``runtimes`` and ``MUSes`` columns are dropped from the output.
-    """
-    df = pd.read_csv(input_csv)
-
-    # Keep only instances where every algorithm completed
-    completed = df.groupby("instance")["status"].apply(lambda s: (s == "COMPLETE").all())
-    completed_instances = completed[completed].index
-    df = df[df["instance"].isin(completed_instances)].copy()
-
-    def _build_curve(row):
-        muses = parse_mus_list(str(row["MUSes"]))
-        runtimes = parse_runtime_list(str(row["runtimes"]))
-        curve = []
-        for i, t in enumerate(runtimes):
-            if i == 0:
-                div = 0.0
-            else:
-                div = float(diversity_setOfMUSes(muses[:i + 1]))
-            curve.append((t, div))
-        return curve
-
-    df["diversity_curve"] = df.apply(_build_curve, axis=1)
-    df["min_diversity"] = df["diversity_curve"].apply(lambda c: c[-1][1] if c else 0.0)
-    df = df.drop(columns=["runtimes", "MUSes"])
-    df = df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
-    df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
-
-
-def filter_completed_xcsp_topk(input_csv: Path, output_csv: Path) -> None:
-    """From the xcsp_topk results file, keep only rows where the algorithm
-    completed (status == 'COMPLETE'), and add a min_diversity column.
-    """
-    df = pd.read_csv(input_csv)
-    df = df[df["status"] == "COMPLETE"].copy()
-
-    def _min_div(row):
-        curve = parse_diversity_curve(str(row["diversity_curve"]))
-        return curve[-1][1] if curve else 0.0
-
-    df["min_diversity"] = df.apply(_min_div, axis=1)
-    df = df.sort_values(["instance", "algorithm"]).reset_index(drop=True)
-    df.to_csv(output_csv, index=False, quoting=csv.QUOTE_MINIMAL)
-
-
 _ALGO_DISPLAY = {
-    "marco":               "MARCO",
-    "marco_diverse_noMin": "D-MARCO v1",
-    "marco_diverse_min":   "D-MARCO v2",
-    "marco_diverse_opt":   "D-MARCO v3",
-    "ocus_enum1":          "D-OCUS v1",
-    "ocus_enum_shrink":    "D-OCUS v2",
-    "ocus_enum_opt":       "D-OCUS v3",
-    "marco_until_diverse": "MARCO top k",
+    "marco":                "MARCO",
+    "marco_diverse_shrink": "D-MARCO-DGS",
+    "marco_diverse_solhint":"D-MARCO-HINT",
+    "marco_diverse_min":    "D-MARCO-COUNT",
+    "marco_diverse_opt":    "D-MARCO-EXACT",
+    "ocus_enum1":           "D-OCUS-SW",
+    "ocus_enum_shrink":     "D-OCUS-CW",
+    "ocus_enum_opt":        "D-OCUS-EXACT",
+    "marco_select_topk":    "MARCO-TOPK",
 }
 
 _ALGO_COLORS = {
-    "marco":               "#f71919",
-    "marco_diverse_noMin": "#e78631",
-    "marco_diverse_min":   "#beb50f",
-    "marco_diverse_opt":   "#ff04c9",
-    "ocus_enum1":          "#55ae47",
-    "ocus_enum_shrink":    "#8a03a8",
-    "ocus_enum_opt":       "#10e892",
-    "marco_until_diverse": "#0b53c8",
+    "marco":                "#d62728",
+    "marco_diverse_shrink": "#ff7f0e",
+    "marco_diverse_solhint":"#bcbd22",
+    "marco_diverse_min":    "#2ca02c",
+    "marco_diverse_opt":    "#17becf",
+    "ocus_enum1":           "#1f77b4",
+    "ocus_enum_shrink":     "#9467bd",
+    "ocus_enum_opt":        "#e377c2",
+    "marco_select_topk":    "#8c564b",
 }
 
 
-def plot_anytime_curves(all_csv: Path, topk_csv: Path, output_dir: Path) -> None:
-    """Merge completed_all and completed_topk on common instances and produce
-    one anytime-diversity PNG per instance saved into output_dir.
 
-    The x-axis is log-scaled time; the y-axis is diversity fixed to [0, 1].
-    Each point in the diversity_curve is plotted as a marker and curves are
-    drawn as step functions (post-step) to reflect the anytime nature.
+def plot_diversity_vs_k(input_csv: Path, output_dir: Path) -> None:
+    """For each instance in input_csv, plot diversity vs k (number of MUSes)
+    for each algorithm that found at least 2 MUSes.
+
+    k ranges from 2 to min(10, num_mus).  At each k the diversity is the
+    min-pairwise diversity over the first k MUSes.  One dot per (algorithm, k)
+    pair.  Plots are saved under output_dir/diversity_vs_k/<instance>.png.
     """
-    df_all  = pd.read_csv(all_csv)
-    df_topk = pd.read_csv(topk_csv)
+    df = pd.read_csv(input_csv)
 
-    common = set(df_all["instance"]) & set(df_topk["instance"])
-    df_all  = df_all[df_all["instance"].isin(common)]
-    df_topk = df_topk[df_topk["instance"].isin(common)]
+    plot_dir = Path(output_dir) / "diversity_vs_k_no_sol_hint"
+    plot_dir.mkdir(parents=True, exist_ok=True)
 
-    combined = pd.concat([df_all, df_topk], ignore_index=True)
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for instance, group in combined.groupby("instance"):
+    for instance, group in df.groupby("instance"):
         fig, ax = plt.subplots(figsize=(8, 5))
+        plotted = {}
 
-        plotted = {}  # algo -> scatter handle for legend
-
-        # Draw marco_until_diverse first so it sits in the background
-        for _, row in group.iterrows():
-            if row["algorithm"] != "marco_until_diverse":
-                continue
-            curve = parse_diversity_curve(str(row["diversity_curve"]))
-            if not curve:
-                continue
-            times = [t for t, _ in curve]
-            divs  = [d for _, d in curve]
-            color = _ALGO_COLORS["marco_until_diverse"]
-            ax.plot(times, divs, color=color, linewidth=1.0, alpha=0.4, zorder=1)
-            sc = ax.scatter(times, divs, color=color, s=40, zorder=2)
-            plotted["marco_until_diverse"] = sc
-
-        # Draw all other algorithms on top — last point only
         for _, row in group.iterrows():
             algo = row["algorithm"]
-            if algo == "marco_until_diverse":
+            num_mus = int(row["num_mus"]) if not pd.isna(row["num_mus"]) else 0
+            if num_mus < 2:
                 continue
-            curve = parse_diversity_curve(str(row["diversity_curve"]))
-            if not curve:
+
+            muses = parse_mus_list(str(row["MUSes"]))
+            k_max = min(10, len(muses))
+            if k_max < 2:
                 continue
-            t, d = curve[-1]
-            color = _ALGO_COLORS.get(algo, None)
-            sc = ax.scatter([t], [d], color=color, s=60, zorder=3)
+
+            ks, divs = [], []
+            for k in range(2, k_max + 1):
+                d = float(diversity_setOfMUSes(muses[:k]))
+                ks.append(k)
+                divs.append(d)
+
+            color = _ALGO_COLORS.get(algo)
+            sc = ax.scatter(ks, divs, color=color, s=50, zorder=3)
+            ax.plot(ks, divs, color=color, linewidth=0.8, alpha=0.6, zorder=2)
             plotted[algo] = sc
 
-        ax.set_xscale("log")
-        ax.set_xlim(1e-2, 60)
-        ax.set_ylim(0, 1)
-        ax.set_xlabel("Time log(s)")
-        ax.set_ylabel("diversity of set of MUSes")
+        if not plotted:
+            plt.close(fig)
+            continue
 
-        # Legend ordered by _ALGO_DISPLAY, only for algorithms that were plotted
-        ordered_handles = []
-        ordered_labels  = []
+        ax.set_xlim(1.5, 10.5)
+        ax.set_ylim(0, 1)
+        ax.set_xticks(range(2, 11))
+        ax.set_xlabel("k (number of MUSes)")
+        ax.set_ylabel("diversity of first k MUSes")
+        ax.set_title(str(instance), fontsize=8)
+
+        ordered_handles, ordered_labels = [], []
         for algo, label in _ALGO_DISPLAY.items():
             if algo in plotted:
                 ordered_handles.append(plotted[algo])
                 ordered_labels.append(label)
-        ax.legend(ordered_handles, ordered_labels, loc="lower right", fontsize=8)
+        ax.legend(ordered_handles, ordered_labels, loc="upper right", fontsize=8)
 
-        ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.5)
+        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
 
         safe_name = str(instance).replace("/", "_").replace("\\", "_")
-        fig.savefig(output_dir/"plots"/f"{safe_name}.png", dpi=300, bbox_inches="tight")
+        fig.savefig(plot_dir / f"{safe_name}.png", dpi=300, bbox_inches="tight")
         plt.close(fig)
+
+
+def avg_diversity_gain_vs_marco(input_csv: Path, output_csv: Path) -> None:
+    """For each algorithm, compute the average diversity gain over marco for k=2..10.
+
+    For each (instance, k) pair where both the algorithm and marco produced at
+    least k MUSes, compute diversity(algo first k MUSes) - diversity(marco first k
+    MUSes).  Average these differences across all qualifying instances for each k,
+    then write one row per algorithm to output_csv.
+    """
+    df = pd.read_csv(input_csv)
+
+    # Parse MUSes once per row
+    df["_muses"] = df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+    df["_n"] = df["_muses"].apply(len)
+
+    # Build per-instance marco lookup: instance -> list of MUSes (up to 10)
+    marco_df = df[df["algorithm"] == "marco"].set_index("instance")
+
+    algorithms = [a for a in df["algorithm"].unique() if a != "marco"]
+    ks = list(range(2, 11))
+
+    rows = []
+    for algo in algorithms:
+        algo_df = df[df["algorithm"] == algo].set_index("instance")
+        sums = {k: 0.0 for k in ks}
+        counts = {k: 0 for k in ks}
+
+        for instance, algo_row in algo_df.iterrows():
+            if instance not in marco_df.index:
+                continue
+            marco_row = marco_df.loc[instance]
+            algo_muses = algo_row["_muses"]
+            marco_muses = marco_row["_muses"]
+
+            for k in ks:
+                if len(algo_muses) < k or len(marco_muses) < k:
+                    continue
+                algo_div = float(diversity_setOfMUSes(algo_muses[:k]))
+                marco_div = float(diversity_setOfMUSes(marco_muses[:k]))
+                sums[k] += algo_div - marco_div
+                counts[k] += 1
+
+        row = {"algorithm": algo}
+        for k in ks:
+            row[f"avg_div_gain_{k}"] = round(sums[k] / counts[k], 6) if counts[k] > 0 else None
+        rows.append(row)
+
+    out_df = pd.DataFrame(rows, columns=["algorithm"] + [f"avg_div_gain_{k}" for k in ks])
+    out_df.to_csv(output_csv, index=False)
+
+
+def avg_diversity_vs_k(input_csv: Path, output_csv: Path) -> None:
+    """For each algorithm, compute the average diversity of the first k MUSes for k=2..10.
+
+    For each (instance, k) pair where the algorithm produced at least k MUSes,
+    compute diversity(algo first k MUSes).  Average these across all qualifying
+    instances for each k, then write one row per algorithm to output_csv.
+    """
+    df = pd.read_csv(input_csv)
+
+    df["_muses"] = df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+
+    ks = list(range(2, 11))
+
+    rows = []
+    for algo in df["algorithm"].unique():
+        algo_df = df[df["algorithm"] == algo]
+        sums = {k: 0.0 for k in ks}
+        counts = {k: 0 for k in ks}
+
+        for _, row in algo_df.iterrows():
+            muses = row["_muses"]
+            for k in ks:
+                if len(muses) < k:
+                    continue
+                sums[k] += float(diversity_setOfMUSes(muses[:k]))
+                counts[k] += 1
+
+        result_row = {"algorithm": algo}
+        for k in ks:
+            result_row[f"avg_div_{k}"] = round(sums[k] / counts[k], 6) if counts[k] > 0 else None
+        rows.append(result_row)
+
+    out_df = pd.DataFrame(rows, columns=["algorithm"] + [f"avg_div_{k}" for k in ks])
+    out_df.to_csv(output_csv, index=False)
+
+
+def avg_diversity_topk(input_csvs: List[Path], output_csv: Path) -> None:
+    """For each k, compute the average diversity from the top-k selection files.
+
+    Rows where n < k are excluded (the algorithm did not find k MUSes).
+    One output row per k with the average diversity across qualifying instances.
+    """
+    df = pd.concat([pd.read_csv(p) for p in input_csvs], ignore_index=True)
+
+    rows = []
+    for k, group in df.groupby("k"):
+        qualifying = group[group["n"] >= k]["diversity"].dropna()
+        rows.append({
+            "k": k,
+            "avg_diversity": round(qualifying.mean(), 6) if len(qualifying) > 0 else None,
+            "num_instances": len(qualifying),
+        })
+
+    pd.DataFrame(rows).sort_values("k").to_csv(output_csv, index=False)
+
+
+def avg_diversity_gain_topk_vs_marco(input_csvs: List[Path], marco_csv: Path, output_csv: Path) -> None:
+    """For each k, compute the average diversity gain of top-k selection over marco.
+
+    For each (instance, k) pair where both top-k selection has n >= k and marco
+    has at least k MUSes, compute diversity(top-k) - diversity(marco first k MUSes).
+    Average these across qualifying instances per k.
+    """
+    topk_df = pd.concat([pd.read_csv(p) for p in input_csvs], ignore_index=True)
+    topk_df = topk_df[topk_df["n"] >= topk_df["k"]].dropna(subset=["diversity"])
+
+    marco_df = pd.read_csv(marco_csv)
+    marco_df = marco_df[marco_df["algorithm"] == "marco"].copy()
+    marco_df["_muses"] = marco_df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+    marco_lookup = marco_df.set_index("instance")["_muses"].to_dict()
+
+    rows = []
+    for k, group in topk_df.groupby("k"):
+        gains = []
+        for _, row in group.iterrows():
+            instance = row["instance"]
+            if instance not in marco_lookup:
+                continue
+            marco_muses = marco_lookup[instance]
+            if len(marco_muses) < k:
+                continue
+            marco_div = float(diversity_setOfMUSes(marco_muses[:k]))
+            gains.append(row["diversity"] - marco_div)
+
+        rows.append({
+            "k": k,
+            "avg_diversity_gain": round(float(np.mean(gains)), 6) if gains else None,
+            "num_instances": len(gains),
+        })
+
+    pd.DataFrame(rows).sort_values("k").to_csv(output_csv, index=False)
+
+
+def plot_avg_diversity_vs_k(avg_div_csv: Path, avg_div_topk_csv: Path, output_dir: Path) -> None:
+    """Plot average diversity vs k for all algorithms and marco-select-top-k.
+
+    x-axis: k in {2, 3, 4, 5, 10}; y-axis: average diversity in [0, 1].
+    Saved as a PDF suitable for inclusion in LaTeX documents.
+    """
+    ks = [2, 3, 4, 5, 10]
+
+    # Load per-algorithm diversity (columns avg_div_2 .. avg_div_10)
+    div_df = pd.read_csv(avg_div_csv)
+    algo_data: dict = {}
+    for _, row in div_df.iterrows():
+        algo = row["algorithm"]
+        vals = [row.get(f"avg_div_{k}") for k in ks]
+        algo_data[algo] = vals
+
+    # Load top-k selection diversity (rows keyed by k)
+    topk_df = pd.read_csv(avg_div_topk_csv).set_index("k")
+    algo_data["marco_select_topk"] = [
+        topk_df.loc[k, "avg_diversity"] if k in topk_df.index else None
+        for k in ks
+    ]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    for algo in _ALGO_DISPLAY:
+        if algo not in algo_data:
+            continue
+        vals = algo_data[algo]
+        # Only plot k values that have a non-null value
+        plot_ks = [k for k, v in zip(ks, vals) if v is not None and not (isinstance(v, float) and np.isnan(v))]
+        plot_vs = [v for v in vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+        if not plot_ks:
+            continue
+        color = _ALGO_COLORS.get(algo, "#333333")
+        label = _ALGO_DISPLAY[algo]
+        ax.plot(plot_ks, plot_vs, marker="o", markersize=4, linewidth=1.5,
+                color=color, label=label)
+
+    ax.set_xlim(1.5, 10.5)
+    ax.set_ylim(0, 1)
+    ax.set_xticks(ks)
+    ax.set_xlabel("k (number of MUSes)", fontsize=11)
+    ax.set_ylabel("average diversity", fontsize=11)
+    ax.tick_params(labelsize=9)
+    ax.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    ax.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
+
+    plot_dir = Path(output_dir)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(plot_dir / "avg_diversity_vs_k.pdf", format="pdf", bbox_inches="tight")
+    plt.close(fig)
 
 
 def main() -> None:
@@ -212,10 +350,6 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path, help="Path to the output directory")
     args = parser.parse_args()
 
-    filter_completed_xcsp(args.input_csv,  args.output_dir/"completed_all.csv")
-    filter_completed_xcsp_topk(args.output_dir/"xcsp_topk_20260416_165301.csv", args.output_dir/"completed_topk.csv")
-
-    plot_anytime_curves(args.output_dir/"completed_all.csv", args.output_dir/"completed_topk.csv", args.output_dir)
 
 
 if __name__ == "__main__":

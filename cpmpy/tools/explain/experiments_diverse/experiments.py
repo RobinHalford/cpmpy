@@ -33,7 +33,7 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
-from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_unsat_nr_models, execute_xcsp_instances, execute_solver_combinations, execute_xcsp_top_k
+from cpmpy.tools.explain.experiments_diverse.utils_experiments import execute_xcsp_instances, execute_solver_combinations, execute_xcsp_top_k
 
 
 def test_solver_combinations(time_limit: int, output_dir: str):
@@ -54,38 +54,11 @@ def test_solver_combinations(time_limit: int, output_dir: str):
     execute_solver_combinations(time_limit=time_limit, output_file_NR=output_file_NR, output_file_xcsp=output_file_xcsp)
     return
     
-
-def benchmark_NR(num_mus: int, solver: str, 
-                 map_solver: str, hs_solver: str,
-                 time_limit: int = 60,
-                 output_dir: str = 'results') -> str:
-    """
-    Benchmark diverse MUS enumeration on Nurse Rostering instances.
-
-    Returns:
-        str: Path to the output CSV file.
-    """
-    # Create output directory if it doesn't exist
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    # Get current timestamp in a filename-safe format
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Define output file path with timestamp
-    output_file = str(output_dir / f"diverse_NR_{timestamp}.csv")
-    # execute experiments 
-    execute_unsat_nr_models(num_mus=num_mus, 
-                            solver=solver, 
-                            map_solver=map_solver, 
-                            hs_solver=hs_solver,
-                            difficulty_factor=0.1,
-                            time_limit=time_limit,
-                            output_file=output_file)
-    return output_file
     
 
 def benchmark_xcsp_MUS(num_mus: int, solver: str, 
                  map_solver: str, hs_solver: str,
-                 time_limit: int = 120,
+                 time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
     Benchmark diverse MUS enumeration on selection of XCSP instances from 
@@ -102,7 +75,7 @@ def benchmark_xcsp_MUS(num_mus: int, solver: str,
     # Define output file path with timestamp
     output_file = str(output_dir / f"xcsp_{timestamp}.csv")
     # execute experiments
-    execute_xcsp_instances(num_mus=num_mus,
+    execute_xcsp_instances(
                            solver=solver,
                            map_solver=map_solver,
                            hs_solver=hs_solver,
@@ -111,30 +84,28 @@ def benchmark_xcsp_MUS(num_mus: int, solver: str,
     return output_file
 
 
-def benchmark_xcsp_until_diverse(num_mus: int, solver: str, 
-                 map_solver: str, hs_solver: str,
-                 time_limit: int = 120,
+
+def benchmark_xcsp_marco_select_top_k(num_mus: int, solver: str,
+                 map_solver: str,
+                 time_limit: int = 60,
                  output_dir: str = 'results') -> str:
     """
-    Benchmark diverse MUS enumeration on selection of XCSP instances from 
-    https://www.xcsp.org/specifications/ (satisfiable instances were transformed to unsatisfiable instances).
+    Benchmark marco select-top-k on XCSP instances.
+    Runs timed_marco for (time_limit - 2) seconds per instance to generate up to n MUSes,
+    then selects the top-k subset by min pairwise diversity using select_top_k.
 
     Returns:
         str: Path to the output CSV file.
     """
-    # Create output directory if it doesn't exist
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Get current timestamp in a filename-safe format
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Define output file path with timestamp
-    output_file = str(output_dir / f"xcsp_topk_{timestamp}.csv")
-    # execute experiments
+    output_file = str(output_dir / f"xcsp_marco_select_top_k_{timestamp}.csv")
     execute_xcsp_top_k(num_mus=num_mus,
-                           solver=solver,
-                           map_solver=map_solver,
-                           time_limit=time_limit,
-                           output_file=output_file)
+                       solver=solver,
+                       map_solver=map_solver,
+                       time_limit=time_limit,
+                       output_file=output_file)
     return output_file
 
 
@@ -153,4 +124,5 @@ if __name__ == "__main__":
     # use **vars(args) to pass all arguments to the benchmark functions
     # benchmark_NR(**vars(args))
     # benchmark_xcsp_MUS(**vars(args))
-    benchmark_xcsp_until_diverse(**vars(args))
+    # benchmark_xcsp_until_diverse(**vars(args))
+    benchmark_xcsp_marco_select_top_k(num_mus=10, solver="exact", map_solver="exact", time_limit=60, output_dir="results")
