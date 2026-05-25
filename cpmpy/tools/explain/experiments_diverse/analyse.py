@@ -344,12 +344,182 @@ def plot_avg_diversity_vs_k(avg_div_csv: Path, avg_div_topk_csv: Path, output_di
     plt.close(fig)
 
 
+def plot_avg_diversity_vs_k_allcomplete(avg_div_csv: Path, output_dir: Path) -> None:
+    """Plot average diversity vs k=2..5 over the all-complete instance set.
+
+    Uses average_diversity_vs_k_ALLCOMPLETE.csv (no top-k column, k limited to
+    2-5).  Saved as avg_diversity_vs_k_ALLCOMPLETE.pdf in output_dir.
+    """
+    ks = [2, 3, 4, 5]
+
+    div_df = pd.read_csv(avg_div_csv)
+    algo_data: dict = {}
+    for _, row in div_df.iterrows():
+        algo = row["algorithm"]
+        algo_data[algo] = [row.get(f"avg_div_{k}") for k in ks]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    for algo in _ALGO_DISPLAY:
+        if algo not in algo_data:
+            continue
+        vals = algo_data[algo]
+        plot_ks = [k for k, v in zip(ks, vals) if v is not None and not (isinstance(v, float) and np.isnan(v))]
+        plot_vs = [v for v in vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+        if not plot_ks:
+            continue
+        ax.plot(plot_ks, plot_vs, marker="o", markersize=4, linewidth=1.5,
+                color=_ALGO_COLORS.get(algo, "#333333"), label=_ALGO_DISPLAY[algo])
+
+    ax.set_xlim(1.5, 5.5)
+    ax.set_ylim(0, 1)
+    ax.set_xticks(ks)
+    ax.set_xlabel("k (number of MUSes)", fontsize=11)
+    ax.set_ylabel("average diversity", fontsize=11)
+    ax.tick_params(labelsize=9)
+    ax.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    ax.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
+
+    plot_dir = Path(output_dir)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(plot_dir / "avg_diversity_vs_k_ALLCOMPLETE.pdf", format="pdf", bbox_inches="tight")
+    plt.close(fig)
+
+
+def avg_time_to_k5_allcomplete(input_csv: Path, output_csv: Path) -> None:
+    """Average time to find the 5th MUS, restricted to the all-complete instance set.
+
+    The all-complete set is the same 20 instances used by avg_diversity_vs_k_allcomplete:
+    every non-topk algorithm must have found at least 5 MUSes.  Time to k=5 is the
+    5th cumulative runtime timestamp (runtimes[4]).
+    """
+    df = pd.read_csv(input_csv)
+    df = df[df["algorithm"] != "marco_select_topk"].copy()
+    df["_muses"] = df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+    df["_n"] = df["_muses"].apply(len)
+    df["_runtimes"] = df["runtimes"].apply(lambda x: parse_runtime_list(str(x)))
+
+    min_n_per_instance = df.groupby("instance")["_n"].min()
+    complete_instances = min_n_per_instance[min_n_per_instance >= 5].index
+    df = df[df["instance"].isin(complete_instances)]
+
+    rows = []
+    for algo in df["algorithm"].unique():
+        algo_df = df[df["algorithm"] == algo]
+        times = [row["_runtimes"][4] for _, row in algo_df.iterrows() if len(row["_runtimes"]) >= 5]
+        rows.append({
+            "algorithm": algo,
+            "avg_time_to_k5": round(float(np.mean(times)), 6) if times else None,
+            "num_instances": len(times),
+        })
+
+    out_df = pd.DataFrame(rows, columns=["algorithm", "avg_time_to_k5", "num_instances"])
+    out_df = out_df.sort_values("avg_time_to_k5")
+    out_df.to_csv(output_csv, index=False)
+    print(f"Wrote avg time to k=5 for {len(complete_instances)} instances to {output_csv}")
+
+
+def diversity_drop_table(input_csv: Path, output_csv: Path) -> None:
+    """For each algorithm, compute the drop in average diversity between k=2→5 and k=5→10.
+
+    For each transition (k_low → k_high), only instances where the algorithm found at
+    least k_high MUSes are included.  The drop is avg_div(k_low) - avg_div(k_high) on
+    that filtered set, so a positive value means diversity fell as k increased.
+
+    Columns written: algorithm, avg_div_2, avg_div_5 (on instances with ≥5 MUSes),
+    drop_2to5, n_2to5, avg_div_5_for10, avg_div_10 (on instances with ≥10 MUSes),
+    drop_5to10, n_5to10.
+    """
+    df = pd.read_csv(input_csv)
+    df["_muses"] = df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+
+    transitions = [(2, 5), (5, 10)]
+    rows = []
+
+    for algo in df["algorithm"].unique():
+        algo_df = df[df["algorithm"] == algo]
+        row: dict = {"algorithm": algo}
+
+        for k_low, k_high in transitions:
+            qualifying = [r["_muses"] for _, r in algo_df.iterrows() if len(r["_muses"]) >= k_high]
+            n = len(qualifying)
+            if n > 0:
+                avg_low = round(sum(float(diversity_setOfMUSes(m[:k_low])) for m in qualifying) / n, 6)
+                avg_high = round(sum(float(diversity_setOfMUSes(m[:k_high])) for m in qualifying) / n, 6)
+                drop = round(avg_low - avg_high, 6)
+            else:
+                avg_low = avg_high = drop = None
+
+            label = f"{k_low}to{k_high}"
+            row[f"avg_div_{k_low}_for{label}"] = avg_low
+            row[f"avg_div_{k_high}_for{label}"] = avg_high
+            row[f"drop_{label}"] = drop
+            row[f"n_{label}"] = n
+
+        rows.append(row)
+
+    columns = ["algorithm"]
+    for k_low, k_high in transitions:
+        label = f"{k_low}to{k_high}"
+        columns += [f"avg_div_{k_low}_for{label}", f"avg_div_{k_high}_for{label}", f"drop_{label}", f"n_{label}"]
+
+    pd.DataFrame(rows, columns=columns).to_csv(output_csv, index=False)
+
+
+def avg_diversity_vs_k_allcomplete(input_csv: Path, output_csv: Path) -> None:
+    """Average diversity for k=2..5 restricted to instances where ALL algorithms have >=5 MUSes.
+
+    Excludes marco_select_topk (post-hoc selection, not comparable).  For each
+    remaining instance, only includes it if every algorithm present for that
+    instance found at least 5 MUSes.  Averages diversity(first k MUSes) over
+    that filtered set for k in {2, 3, 4, 5}.
+    """
+    df = pd.read_csv(input_csv)
+    df = df[df["algorithm"] != "marco_select_topk"].copy()
+    df["_muses"] = df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+    df["_n"] = df["_muses"].apply(len)
+
+    # Keep only instances where every algorithm reached >=5 MUSes
+    min_n_per_instance = df.groupby("instance")["_n"].min()
+    complete_instances = min_n_per_instance[min_n_per_instance >= 5].index
+    df = df[df["instance"].isin(complete_instances)]
+
+    ks = [2, 3, 4, 5]
+    rows = []
+    for algo in df["algorithm"].unique():
+        algo_df = df[df["algorithm"] == algo]
+        sums = {k: 0.0 for k in ks}
+        counts = {k: 0 for k in ks}
+
+        for _, row in algo_df.iterrows():
+            muses = row["_muses"]
+            for k in ks:
+                if len(muses) < k:
+                    continue
+                sums[k] += float(diversity_setOfMUSes(muses[:k]))
+                counts[k] += 1
+
+        result_row = {"algorithm": algo}
+        for k in ks:
+            result_row[f"avg_div_{k}"] = round(sums[k] / counts[k], 6) if counts[k] > 0 else None
+        rows.append(result_row)
+
+    out_df = pd.DataFrame(rows, columns=["algorithm"] + [f"avg_div_{k}" for k in ks])
+    out_df.to_csv(output_csv, index=False)
+    print(f"Wrote {len(complete_instances)} complete instances to {output_csv}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Summarize MUS result CSV.")
     parser.add_argument("input_csv", type=Path, help="Path to the original CSV file")
     parser.add_argument("output_dir", type=Path, help="Path to the output directory")
     args = parser.parse_args()
 
+    input_csv = Path("results/xcsp_20260519_215510.csv")
+    output_csv = Path("results/average_diversity_vs_k_ALLCOMPLETE.csv")
+    avg_diversity_vs_k_allcomplete(input_csv, output_csv)
+    plot_avg_diversity_vs_k_allcomplete(output_csv, Path("results"))
+    avg_time_to_k5_allcomplete(input_csv, Path("results/avg_time_to_k5_ALLCOMPLETE.csv"))
 
 
 if __name__ == "__main__":
