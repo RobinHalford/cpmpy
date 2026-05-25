@@ -123,6 +123,6 @@ if __name__ == "__main__":
 
     # use **vars(args) to pass all arguments to the benchmark functions
     # benchmark_NR(**vars(args))
-    # benchmark_xcsp_MUS(**vars(args))
+    benchmark_xcsp_MUS(**vars(args))
     # benchmark_xcsp_until_diverse(**vars(args))
-    benchmark_xcsp_marco_select_top_k(num_mus=10, solver="exact", map_solver="exact", time_limit=60, output_dir="results")
+    # benchmark_xcsp_marco_select_top_k(num_mus=10, solver="exact", map_solver="exact", time_limit=60, output_dir="results")
