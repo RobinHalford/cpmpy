@@ -81,72 +81,6 @@ _ALGO_COLORS = {
     "marco_select_topk":    "#8c564b",
 }
 
-
-
-def plot_diversity_vs_k(input_csv: Path, output_dir: Path) -> None:
-    """For each instance in input_csv, plot diversity vs k (number of MUSes)
-    for each algorithm that found at least 2 MUSes.
-
-    k ranges from 2 to min(10, num_mus).  At each k the diversity is the
-    min-pairwise diversity over the first k MUSes.  One dot per (algorithm, k)
-    pair.  Plots are saved under output_dir/diversity_vs_k/<instance>.png.
-    """
-    df = pd.read_csv(input_csv)
-
-    plot_dir = Path(output_dir) / "diversity_vs_k_no_sol_hint"
-    plot_dir.mkdir(parents=True, exist_ok=True)
-
-    for instance, group in df.groupby("instance"):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        plotted = {}
-
-        for _, row in group.iterrows():
-            algo = row["algorithm"]
-            num_mus = int(row["num_mus"]) if not pd.isna(row["num_mus"]) else 0
-            if num_mus < 2:
-                continue
-
-            muses = parse_mus_list(str(row["MUSes"]))
-            k_max = min(10, len(muses))
-            if k_max < 2:
-                continue
-
-            ks, divs = [], []
-            for k in range(2, k_max + 1):
-                d = float(diversity_setOfMUSes(muses[:k]))
-                ks.append(k)
-                divs.append(d)
-
-            color = _ALGO_COLORS.get(algo)
-            sc = ax.scatter(ks, divs, color=color, s=50, zorder=3)
-            ax.plot(ks, divs, color=color, linewidth=0.8, alpha=0.6, zorder=2)
-            plotted[algo] = sc
-
-        if not plotted:
-            plt.close(fig)
-            continue
-
-        ax.set_xlim(1.5, 10.5)
-        ax.set_ylim(0, 1)
-        ax.set_xticks(range(2, 11))
-        ax.set_xlabel("k (number of MUSes)")
-        ax.set_ylabel("diversity of first k MUSes")
-        ax.set_title(str(instance), fontsize=8)
-
-        ordered_handles, ordered_labels = [], []
-        for algo, label in _ALGO_DISPLAY.items():
-            if algo in plotted:
-                ordered_handles.append(plotted[algo])
-                ordered_labels.append(label)
-        ax.legend(ordered_handles, ordered_labels, loc="upper right", fontsize=8)
-
-        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-
-        safe_name = str(instance).replace("/", "_").replace("\\", "_")
-        fig.savefig(plot_dir / f"{safe_name}.png", dpi=300, bbox_inches="tight")
-        plt.close(fig)
-
-
 def avg_diversity_gain_vs_marco(input_csv: Path, output_csv: Path) -> None:
     """For each algorithm, compute the average diversity gain over marco for k=2..10.
 
@@ -509,17 +443,79 @@ def avg_diversity_vs_k_allcomplete(input_csv: Path, output_csv: Path) -> None:
     print(f"Wrote {len(complete_instances)} complete instances to {output_csv}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Summarize MUS result CSV.")
-    parser.add_argument("input_csv", type=Path, help="Path to the original CSV file")
-    parser.add_argument("output_dir", type=Path, help="Path to the output directory")
-    args = parser.parse_args()
+def plot_time_vs_diversity_k(input_csv: Path, output_dir: Path, k: int) -> None:
+    """Scatter plot: avg time to k-th MUS (x) vs avg diversity at k (y).
 
-    input_csv = Path("results/xcsp_20260519_215510.csv")
-    output_csv = Path("results/average_diversity_vs_k_ALLCOMPLETE.csv")
-    avg_diversity_vs_k_allcomplete(input_csv, output_csv)
-    plot_avg_diversity_vs_k_allcomplete(output_csv, Path("results"))
-    avg_time_to_k5_allcomplete(input_csv, Path("results/avg_time_to_k5_ALLCOMPLETE.csv"))
+    Only instances where every algorithm (excluding marco_select_topk) found at
+    least k MUSes are included.  Each algorithm is rendered as a single dot with
+    a legend.
+    """
+    df = pd.read_csv(input_csv)
+    df = df[df["algorithm"] != "marco_select_topk"].copy()
+    df["_muses"] = df["MUSes"].apply(lambda x: parse_mus_list(str(x)))
+    df["_n"] = df["_muses"].apply(len)
+    df["_runtimes"] = df["runtimes"].apply(lambda x: parse_runtime_list(str(x)))
+
+    min_n_per_instance = df.groupby("instance")["_n"].min()
+    complete_instances = min_n_per_instance[min_n_per_instance >= k].index
+    df = df[df["instance"].isin(complete_instances)]
+
+    points = {}
+    for algo in df["algorithm"].unique():
+        algo_df = df[df["algorithm"] == algo]
+        times, divs = [], []
+        for _, row in algo_df.iterrows():
+            if len(row["_runtimes"]) >= k and len(row["_muses"]) >= k:
+                times.append(row["_runtimes"][k - 1])
+                divs.append(float(diversity_setOfMUSes(row["_muses"][:k])))
+        if times:
+            points[algo] = (float(np.mean(times)), float(np.mean(divs)))
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    for algo, (avg_time, avg_div) in points.items():
+        color = _ALGO_COLORS.get(algo, "#333333")
+        label = _ALGO_DISPLAY.get(algo, algo)
+        ax.scatter(avg_time, avg_div, color=color, s=60, zorder=3, label=label)
+
+    ax.set_xlabel(f"average time to k={k} (s)", fontsize=11)
+    ax.set_ylabel(f"average diversity at k={k}", fontsize=11)
+    ax.set_ylim(0, 1)
+    ax.tick_params(labelsize=9)
+    ax.legend(fontsize=8, loc="best", framealpha=0.9)
+    ax.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
+
+    plot_dir = Path(output_dir)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    out_path = plot_dir / f"time_vs_diversity_k{k}.pdf"
+    fig.savefig(out_path, format="pdf", bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote scatter plot ({len(complete_instances)} instances) to {out_path}")
+
+
+def main() -> None:
+    input_csv = Path("results/xcsp_20260525_161136.csv")
+    results_dir = Path("results")
+    plots_dir = results_dir / "plots"
+
+    topk_csvs = sorted(results_dir.glob("xcsp_marco_select_top_k_*.csv"))
+
+    avg_diversity_vs_k(input_csv, results_dir / "average_diversity_vs_k.csv")
+    avg_diversity_gain_vs_marco(input_csv, results_dir / "average_diversity_gain_vs_marco.csv")
+    diversity_drop_table(input_csv, results_dir / "diversity_drop.csv")
+
+    allcomplete_csv = results_dir / "average_diversity_vs_k_ALLCOMPLETE.csv"
+    avg_diversity_vs_k_allcomplete(input_csv, allcomplete_csv)
+    avg_time_to_k5_allcomplete(input_csv, results_dir / "average_time_to_k5_ALLCOMPLETE.csv")
+
+    plot_avg_diversity_vs_k(
+        results_dir / "average_diversity_vs_k.csv",
+        results_dir / "average_diversity_topk.csv",
+        plots_dir,
+    )
+    plot_avg_diversity_vs_k_allcomplete(allcomplete_csv, plots_dir)
+    plot_time_vs_diversity_k(input_csv, plots_dir, k=5)
+    plot_time_vs_diversity_k(input_csv, plots_dir, k=10)
 
 
 if __name__ == "__main__":
