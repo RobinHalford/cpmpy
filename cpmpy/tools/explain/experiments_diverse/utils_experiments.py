@@ -16,7 +16,7 @@ import pandas as pd
 import time
 from cpmpy.tools.explain.mus import smus
 from cpmpy.tools.explain.marco import timed_marco
-from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_shrink, marco_diverse_solhint, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS, select_top_k
+from cpmpy.tools.explain.diverse_enumeration import marco_diverse_Min, marco_diverse_shrink, marco_diverse_solhint, marco_diverse_optimal, marco_until_diverse, ocus_enum_1, ocus_enum_shrink, ocus_enum_opt_nextMUS, select_top_k, marco_diverse_shrink_noCore
 from cpmpy.tools.explain.utils import diversity_pair
 from examples.nurserostering import NurseRosteringDataset, nurserostering_model, parse_scheduling_period
 
@@ -180,6 +180,8 @@ def run_single_xcsp_instance(queue, path, filename, algorithm, solver, map_solve
             generator = timed_marco(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         # elif algorithm == "marco_select_top_k":
             #
+        elif algorithm == "marco_diverse_shrink_noCore":
+            generator = marco_diverse_shrink_noCore(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_shrink":
             generator = marco_diverse_shrink(model.constraints,solver=solver,map_solver=map_solver, time_limit=time_limit)
         elif algorithm == "marco_diverse_solhint":
@@ -283,14 +285,15 @@ def execute_xcsp_instances(solver, map_solver, hs_solver, time_limit, output_fil
     )["filename"].tolist()
 
     algorithms = [
-        "marco",
-        "marco_diverse_shrink",
-        "marco_diverse_solhint",
-        "marco_diverse_min",
-        "marco_diverse_opt",
-        "ocus_enum1",
-        "ocus_enum_shrink",
-        "ocus_enum_opt"
+        "marco_diverse_shrink_noCore"
+        # "marco",
+        # "marco_diverse_shrink",
+        # "marco_diverse_solhint",
+        # "marco_diverse_min",
+        # "marco_diverse_opt",
+        # "ocus_enum1",
+        # "ocus_enum_shrink",
+        # "ocus_enum_opt"
     ]
 
     tasks = [
