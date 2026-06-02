@@ -59,7 +59,8 @@ def parse_diversity_curve(text: str) -> List[tuple]:
 
 _ALGO_DISPLAY = {
     "marco":                "MARCO",
-    "marco_diverse_shrink": "D-MARCO-DGS",
+    # "marco_diverse_shrink": "D-MARCO-DGS",
+    "marco_diverse_shrink_noCore": "D-MARCO-DGS",
     "marco_diverse_solhint":"D-MARCO-HINT",
     "marco_diverse_min":    "D-MARCO-COUNT",
     "marco_diverse_opt":    "D-MARCO-EXACT",
@@ -71,7 +72,8 @@ _ALGO_DISPLAY = {
 
 _ALGO_COLORS = {
     "marco":                "#d62728",
-    "marco_diverse_shrink": "#ff7f0e",
+    # "marco_diverse_shrink": "#ff7f0e",
+    "marco_diverse_shrink_noCore": "#ff7f0e",
     "marco_diverse_solhint":"#bcbd22",
     "marco_diverse_min":    "#2ca02c",
     "marco_diverse_opt":    "#17becf",
@@ -269,7 +271,7 @@ def plot_avg_diversity_vs_k(avg_div_csv: Path, avg_div_topk_csv: Path, output_di
     ax.set_xlabel("k (number of MUSes)", fontsize=11)
     ax.set_ylabel("average diversity", fontsize=11)
     ax.tick_params(labelsize=9)
-    ax.legend(fontsize=8, loc="upper right", framealpha=0.9)
+    ax.legend(fontsize=8, loc="upper right", framealpha=0.9, ncols=2)
     ax.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
 
     plot_dir = Path(output_dir)
@@ -462,6 +464,8 @@ def plot_time_vs_diversity_k(input_csv: Path, output_dir: Path, k: int) -> None:
 
     points = {}
     for algo in df["algorithm"].unique():
+        if algo not in _ALGO_DISPLAY:
+            continue
         algo_df = df[df["algorithm"] == algo]
         times, divs = [], []
         for _, row in algo_df.iterrows():
